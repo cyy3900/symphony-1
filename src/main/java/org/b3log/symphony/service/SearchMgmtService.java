@@ -21,9 +21,10 @@ import jodd.http.HttpRequest;
 import jodd.http.HttpResponse;
 import jodd.net.MimeTypes;
 import okio.Utf8;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.service.annotation.Service;
 import org.b3log.symphony.model.Article;
 import org.b3log.symphony.util.Markdowns;
@@ -49,7 +50,7 @@ public class SearchMgmtService {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(SearchMgmtService.class);
+    private static final Logger LOGGER = LogManager.getLogger(SearchMgmtService.class);
 
     /**
      * Elasticsearch index name.
@@ -107,7 +108,6 @@ public class SearchMgmtService {
                 if (200 != response.statusCode()) {
                     LOGGER.warn(response.toString());
                 }
-
                 break;
             } catch (final Exception e) {
                 LOGGER.log(Level.WARN, "Clear index failed", e);
@@ -209,7 +209,6 @@ public class SearchMgmtService {
                 if (200 != response.statusCode()) {
                     LOGGER.warn(response.bodyText());
                 }
-
                 break;
             } catch (final Exception e) {
                 LOGGER.log(Level.WARN, "Index failed", e);
@@ -252,7 +251,6 @@ public class SearchMgmtService {
                 if (200 != response.statusCode()) {
                     LOGGER.warn(response.toString());
                 }
-
                 break;
             } catch (final Exception e) {
                 LOGGER.log(Level.WARN, "Remove object failed", e);

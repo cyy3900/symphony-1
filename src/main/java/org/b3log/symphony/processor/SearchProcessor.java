@@ -18,26 +18,17 @@
 package org.b3log.symphony.processor;
 
 import org.apache.commons.lang.StringUtils;
-import org.b3log.latke.http.HttpMethod;
 import org.b3log.latke.http.Request;
 import org.b3log.latke.http.RequestContext;
-import org.b3log.latke.http.annotation.After;
-import org.b3log.latke.http.annotation.Before;
-import org.b3log.latke.http.annotation.RequestProcessing;
-import org.b3log.latke.http.annotation.RequestProcessor;
 import org.b3log.latke.http.renderer.AbstractFreeMarkerRenderer;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Logger;
+import org.b3log.latke.ioc.Singleton;
 import org.b3log.latke.model.Pagination;
 import org.b3log.latke.service.LangPropsService;
 import org.b3log.latke.util.Paginator;
 import org.b3log.symphony.model.Article;
 import org.b3log.symphony.model.Common;
 import org.b3log.symphony.model.UserExt;
-import org.b3log.symphony.processor.advice.AnonymousViewCheck;
-import org.b3log.symphony.processor.advice.PermissionGrant;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchEndAdvice;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchStartAdvice;
 import org.b3log.symphony.service.ArticleQueryService;
 import org.b3log.symphony.service.DataModelService;
 import org.b3log.symphony.service.SearchQueryService;
@@ -59,16 +50,11 @@ import java.util.Map;
  * </ul>
  *
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
- * @version 1.1.4.1, Dec 8, 2017
+ * @version 2.0.0.0, Feb 11, 2020
  * @since 1.4.0
  */
-@RequestProcessor
+@Singleton
 public class SearchProcessor {
-
-    /**
-     * Logger.
-     */
-    private static final Logger LOGGER = Logger.getLogger(SearchProcessor.class);
 
     /**
      * Search query service.
@@ -105,9 +91,6 @@ public class SearchProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/search", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void search(final RequestContext context) {
         final Request request = context.getRequest();
 
@@ -115,7 +98,6 @@ public class SearchProcessor {
 
         if (!Symphonys.ES_ENABLED && !Symphonys.ALGOLIA_ENABLED) {
             context.sendError(404);
-
             return;
         }
 
@@ -139,7 +121,6 @@ public class SearchProcessor {
             final JSONObject result = searchQueryService.searchElasticsearch(Article.ARTICLE, keyword, pageNum, pageSize);
             if (null == result || 0 != result.optInt("status")) {
                 context.sendError(404);
-
                 return;
             }
 
@@ -158,7 +139,6 @@ public class SearchProcessor {
             final JSONObject result = searchQueryService.searchAlgolia(keyword, pageNum, pageSize);
             if (null == result) {
                 context.sendError(404);
-
                 return;
             }
 

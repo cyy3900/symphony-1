@@ -18,12 +18,13 @@
 package org.b3log.symphony.service;
 
 import org.apache.commons.lang.StringUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.Latkes;
 import org.b3log.latke.http.Request;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.model.Pagination;
 import org.b3log.latke.model.User;
 import org.b3log.latke.repository.*;
@@ -38,7 +39,6 @@ import org.b3log.symphony.repository.FollowRepository;
 import org.b3log.symphony.repository.PointtransferRepository;
 import org.b3log.symphony.repository.UserRepository;
 import org.b3log.symphony.util.Sessions;
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -58,7 +58,7 @@ public class UserQueryService {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(UserQueryService.class);
+    private static final Logger LOGGER = LogManager.getLogger(UserQueryService.class);
 
     /**
      * All usernames.
@@ -112,18 +112,15 @@ public class UserQueryService {
                     setFilter(new PropertyFilter(UserExt.USER_STATUS, FilterOperator.EQUAL, UserExt.USER_STATUS_C_VALID)).
                     addSort(UserExt.USER_ARTICLE_COUNT, SortDirection.DESCENDING).
                     addSort(UserExt.USER_COMMENT_COUNT, SortDirection.DESCENDING);
-            final JSONArray rangeUsers = userRepository.get(userQuery).optJSONArray(Keys.RESULTS);
-
-            final int realLen = rangeUsers.length();
+            final List<JSONObject> rangeUsers = userRepository.getList(userQuery);
+            final int realLen = rangeUsers.size();
             if (realLen < fetchSize) {
                 fetchSize = realLen;
             }
 
-
             final List<Integer> indices = CollectionUtils.getRandomIntegers(0, realLen, fetchSize);
-
             for (final Integer index : indices) {
-                ret.add(rangeUsers.getJSONObject(index));
+                ret.add(rangeUsers.get(index));
             }
 
             for (final JSONObject selectedUser : ret) {
@@ -187,37 +184,28 @@ public class UserQueryService {
      * @throws ServiceException service exception
      * @see Pagination
      */
-    public JSONObject getLatestLoggedInUsers(final long time, final int currentPageNum, final int pageSize,
-                                             final int windowSize) throws ServiceException {
+    public JSONObject getLatestLoggedInUsers(final long time, final int currentPageNum, final int pageSize, final int windowSize) throws ServiceException {
         final JSONObject ret = new JSONObject();
-
         final Query query = new Query().addSort(Keys.OBJECT_ID, SortDirection.DESCENDING).
                 setPage(currentPageNum, pageSize).
                 setFilter(CompositeFilterOperator.and(
                         new PropertyFilter(UserExt.USER_STATUS, FilterOperator.EQUAL, UserExt.USER_STATUS_C_VALID),
-                        new PropertyFilter(UserExt.USER_LATEST_LOGIN_TIME, FilterOperator.GREATER_THAN_OR_EQUAL, time)
-                ));
-
+                        new PropertyFilter(UserExt.USER_LATEST_LOGIN_TIME, FilterOperator.GREATER_THAN_OR_EQUAL, time)));
         JSONObject result;
         try {
             result = userRepository.get(query);
         } catch (final RepositoryException e) {
             LOGGER.log(Level.ERROR, "Gets latest logged in user failed", e);
-
             throw new ServiceException(e);
         }
 
         final int pageCount = result.optJSONObject(Pagination.PAGINATION).optInt(Pagination.PAGINATION_PAGE_COUNT);
-
         final JSONObject pagination = new JSONObject();
         ret.put(Pagination.PAGINATION, pagination);
         final List<Integer> pageNums = Paginator.paginate(currentPageNum, pageSize, pageCount, windowSize);
         pagination.put(Pagination.PAGINATION_PAGE_COUNT, pageCount);
         pagination.put(Pagination.PAGINATION_PAGE_NUMS, pageNums);
-
-        final JSONArray users = result.optJSONArray(Keys.RESULTS);
-        ret.put(User.USERS, users);
-
+        ret.put(User.USERS, result.opt(Keys.RESULTS));
         return ret;
     }
 
@@ -283,11 +271,8 @@ public class UserQueryService {
                 setFilter(new PropertyFilter(UserExt.USER_STATUS, FilterOperator.EQUAL, UserExt.USER_STATUS_C_VALID)).
                 select(User.USER_NAME, UserExt.USER_AVATAR_URL);
         try {
-            final JSONObject result = userRepository.get(query);
-            final JSONArray array = result.optJSONArray(Keys.RESULTS);
-            for (int i = 0; i < array.length(); i++) {
-                final JSONObject user = array.optJSONObject(i);
-
+            final List<JSONObject> list = userRepository.getList(query);
+            for (final JSONObject user : list) {
                 final JSONObject u = new JSONObject();
                 u.put(User.USER_NAME, user.optString(User.USER_NAME));
                 u.put(UserExt.USER_T_NAME_LOWER_CASE, user.optString(User.USER_NAME).toLowerCase());
@@ -296,10 +281,9 @@ public class UserQueryService {
                 USER_NAMES.add(u);
             }
 
-            Collections.sort(USER_NAMES, (u1, u2) -> {
+            USER_NAMES.sort((u1, u2) -> {
                 final String u1Name = u1.optString(UserExt.USER_T_NAME_LOWER_CASE);
                 final String u2Name = u2.optString(UserExt.USER_T_NAME_LOWER_CASE);
-
                 return u1Name.compareTo(u2Name);
             });
         } catch (final RepositoryException e) {
@@ -580,7 +564,6 @@ public class UserQueryService {
             result = userRepository.get(query);
         } catch (final RepositoryException e) {
             LOGGER.log(Level.ERROR, "Gets users failed", e);
-
             return null;
         }
 
@@ -591,15 +574,11 @@ public class UserQueryService {
         pagination.put(Pagination.PAGINATION_PAGE_COUNT, pageCount);
         pagination.put(Pagination.PAGINATION_PAGE_NUMS, pageNums);
 
-        final JSONArray users = result.optJSONArray(Keys.RESULTS);
-        ret.put(User.USERS, users);
-
-        for (int i = 0; i < users.length(); i++) {
-            final JSONObject user = users.optJSONObject(i);
+        final List<JSONObject> users = (List<JSONObject>) result.opt(Keys.RESULTS);
+        ret.put(User.USERS, (Object) users);
+        for (final JSONObject user : users) {
             user.put(UserExt.USER_T_CREATE_TIME, new Date(user.optLong(Keys.OBJECT_ID)));
-
             avatarQueryService.fillUserAvatarURL(user);
-
             final JSONObject role = roleQueryService.getRole(user.optString(User.USER_ROLE));
             user.put(Role.ROLE_NAME, role.optString(Role.ROLE_NAME));
         }
@@ -650,37 +629,31 @@ public class UserQueryService {
                         new PropertyFilter(UserExt.USER_CITY, FilterOperator.EQUAL, city),
                         new PropertyFilter(UserExt.USER_GEO_STATUS, FilterOperator.EQUAL, UserExt.USER_GEO_STATUS_C_PUBLIC),
                         new PropertyFilter(UserExt.USER_STATUS, FilterOperator.EQUAL, UserExt.USER_STATUS_C_VALID),
-                        new PropertyFilter(UserExt.USER_LATEST_LOGIN_TIME, FilterOperator.GREATER_THAN_OR_EQUAL, latestTime)
-                ));
+                        new PropertyFilter(UserExt.USER_LATEST_LOGIN_TIME, FilterOperator.GREATER_THAN_OR_EQUAL, latestTime)));
         JSONObject result;
         try {
             result = userRepository.get(query);
         } catch (final RepositoryException e) {
             LOGGER.log(Level.ERROR, "Gets users by city error", e);
-
             return null;
         }
 
         final int pageCount = result.optJSONObject(Pagination.PAGINATION).optInt(Pagination.PAGINATION_PAGE_COUNT);
-
         final JSONObject pagination = new JSONObject();
         ret.put(Pagination.PAGINATION, pagination);
         final List<Integer> pageNums = Paginator.paginate(currentPageNum, pageSize, pageCount, windowSize);
         pagination.put(Pagination.PAGINATION_PAGE_COUNT, pageCount);
         pagination.put(Pagination.PAGINATION_PAGE_NUMS, pageNums);
 
-        final JSONArray users = result.optJSONArray(Keys.RESULTS);
+        final List<JSONObject> users = (List<JSONObject>) result.opt(Keys.RESULTS);
         try {
-            for (int i = 0; i < users.length(); i++) {
-                JSONObject user = users.getJSONObject(i);
-                users.getJSONObject(i).put(Common.IS_FOLLOWING,
-                        followRepository.exists(requestJSONObject.optString(Keys.OBJECT_ID), user.optString(Keys.OBJECT_ID),
-                                Follow.FOLLOWING_TYPE_C_USER));
+            for (final JSONObject user : users) {
+                user.put(Common.IS_FOLLOWING, followRepository.exists(requestJSONObject.optString(Keys.OBJECT_ID), user.optString(Keys.OBJECT_ID), Follow.FOLLOWING_TYPE_C_USER));
             }
         } catch (final RepositoryException | JSONException e) {
             LOGGER.log(Level.ERROR, "Fills following failed", e);
         }
-        ret.put(User.USERS, users);
+        ret.put(User.USERS, (Object) users);
         return ret;
     }
 

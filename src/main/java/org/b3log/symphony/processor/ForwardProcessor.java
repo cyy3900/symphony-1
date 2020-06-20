@@ -19,20 +19,13 @@ package org.b3log.symphony.processor;
 
 import org.apache.commons.lang.StringUtils;
 import org.b3log.latke.Latkes;
-import org.b3log.latke.http.HttpMethod;
 import org.b3log.latke.http.Request;
 import org.b3log.latke.http.RequestContext;
-import org.b3log.latke.http.annotation.After;
-import org.b3log.latke.http.annotation.Before;
-import org.b3log.latke.http.annotation.RequestProcessing;
-import org.b3log.latke.http.annotation.RequestProcessor;
 import org.b3log.latke.http.renderer.AbstractFreeMarkerRenderer;
 import org.b3log.latke.ioc.Inject;
+import org.b3log.latke.ioc.Singleton;
 import org.b3log.symphony.model.Common;
 import org.b3log.symphony.model.UserExt;
-import org.b3log.symphony.processor.advice.PermissionGrant;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchEndAdvice;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchStartAdvice;
 import org.b3log.symphony.service.DataModelService;
 import org.b3log.symphony.service.LinkMgmtService;
 import org.b3log.symphony.util.Headers;
@@ -49,10 +42,10 @@ import java.util.Map;
  * </ul>
  *
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
- * @version 1.0.0.5, Jan 17, 2019
+ * @version 2.0.0.0, Feb 11, 2020
  * @since 2.3.0
  */
-@RequestProcessor
+@Singleton
 public class ForwardProcessor {
 
     /**
@@ -71,11 +64,7 @@ public class ForwardProcessor {
      * Shows jump page.
      *
      * @param context the specified context
-     * @throws Exception exception
      */
-    @RequestProcessing(value = "/forward", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showForward(final RequestContext context) {
         final Request request = context.getRequest();
 
@@ -87,7 +76,6 @@ public class ForwardProcessor {
         final String referer = Headers.getHeader(request, "referer", "");
         if (!StringUtils.startsWith(referer, Latkes.getServePath())) {
             context.sendRedirect(Latkes.getServePath());
-
             return;
         }
 
@@ -97,7 +85,6 @@ public class ForwardProcessor {
         final JSONObject user = Sessions.getUser();
         if (null != user && UserExt.USER_XXX_STATUS_C_DISABLED == user.optInt(UserExt.USER_FORWARD_PAGE_STATUS)) {
             context.sendRedirect(to);
-
             return;
         }
 

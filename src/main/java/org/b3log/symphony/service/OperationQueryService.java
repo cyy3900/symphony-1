@@ -18,23 +18,22 @@
 package org.b3log.symphony.service;
 
 import org.apache.commons.lang.time.DateFormatUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.model.Pagination;
 import org.b3log.latke.repository.Query;
 import org.b3log.latke.repository.RepositoryException;
 import org.b3log.latke.repository.SortDirection;
 import org.b3log.latke.service.LangPropsService;
 import org.b3log.latke.service.annotation.Service;
-import org.b3log.latke.util.CollectionUtils;
 import org.b3log.latke.util.Paginator;
 import org.b3log.symphony.model.Operation;
 import org.b3log.symphony.model.UserExt;
 import org.b3log.symphony.repository.OperationRepository;
 import org.b3log.symphony.repository.UserRepository;
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
@@ -53,7 +52,7 @@ public class OperationQueryService {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(OperationQueryService.class);
+    private static final Logger LOGGER = LogManager.getLogger(OperationQueryService.class);
 
     /**
      * Operation repository.
@@ -107,16 +106,13 @@ public class OperationQueryService {
         final int pageSize = requestJSONObject.optInt(Pagination.PAGINATION_PAGE_SIZE);
         final int windowSize = requestJSONObject.optInt(Pagination.PAGINATION_WINDOW_SIZE);
         final Query query = new Query().setPage(currentPageNum, pageSize).addSort(Keys.OBJECT_ID, SortDirection.DESCENDING);
-
         JSONObject result;
         try {
             result = operationRepository.get(query);
         } catch (final RepositoryException e) {
             LOGGER.log(Level.ERROR, "Get operations failed", e);
-
             return null;
         }
-
         final int pageCount = result.optJSONObject(Pagination.PAGINATION).optInt(Pagination.PAGINATION_PAGE_COUNT);
         final JSONObject pagination = new JSONObject();
         ret.put(Pagination.PAGINATION, pagination);
@@ -124,8 +120,7 @@ public class OperationQueryService {
         pagination.put(Pagination.PAGINATION_PAGE_COUNT, pageCount);
         pagination.put(Pagination.PAGINATION_PAGE_NUMS, pageNums);
 
-        final JSONArray data = result.optJSONArray(Keys.RESULTS);
-        final List<JSONObject> records = CollectionUtils.jsonArrayToList(data);
+        final List<JSONObject> records = (List<JSONObject>) result.opt((Keys.RESULTS));
         final List<JSONObject> auditlogs = new ArrayList<>();
         for (final JSONObject record : records) {
             final JSONObject auditlog = new JSONObject();
@@ -143,12 +138,9 @@ public class OperationQueryService {
                 auditlogs.add(auditlog);
             } catch (final Exception e) {
                 LOGGER.log(Level.ERROR, "Builds audit log failed", e);
-
-                continue;
             }
         }
-        ret.put(Operation.OPERATIONS, auditlogs);
-
+        ret.put(Operation.OPERATIONS, (Object) auditlogs);
         return ret;
     }
 }

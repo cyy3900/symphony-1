@@ -21,37 +21,32 @@ import org.apache.commons.lang.RandomStringUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.time.DateFormatUtils;
 import org.apache.commons.lang.time.DateUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.Latkes;
-import org.b3log.latke.http.HttpMethod;
+import org.b3log.latke.http.Dispatcher;
 import org.b3log.latke.http.Request;
 import org.b3log.latke.http.RequestContext;
 import org.b3log.latke.http.Response;
-import org.b3log.latke.http.annotation.After;
-import org.b3log.latke.http.annotation.Before;
-import org.b3log.latke.http.annotation.RequestProcessing;
-import org.b3log.latke.http.annotation.RequestProcessor;
 import org.b3log.latke.http.renderer.AbstractFreeMarkerRenderer;
+import org.b3log.latke.ioc.BeanManager;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
+import org.b3log.latke.ioc.Singleton;
 import org.b3log.latke.model.User;
 import org.b3log.latke.service.LangPropsService;
 import org.b3log.latke.service.ServiceException;
 import org.b3log.latke.util.Strings;
 import org.b3log.latke.util.TimeZones;
 import org.b3log.symphony.model.*;
-import org.b3log.symphony.processor.advice.*;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchEndAdvice;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchStartAdvice;
-import org.b3log.symphony.processor.advice.validate.PointTransferValidation;
-import org.b3log.symphony.processor.advice.validate.UpdatePasswordValidation;
-import org.b3log.symphony.processor.advice.validate.UpdateProfilesValidation;
+import org.b3log.symphony.processor.middleware.CSRFMidware;
+import org.b3log.symphony.processor.middleware.LoginCheckMidware;
+import org.b3log.symphony.processor.middleware.validate.PointTransferValidationMidware;
+import org.b3log.symphony.processor.middleware.validate.UpdatePasswordValidationMidware;
+import org.b3log.symphony.processor.middleware.validate.UpdateProfilesValidationMidware;
 import org.b3log.symphony.service.*;
-import org.b3log.symphony.util.Escapes;
-import org.b3log.symphony.util.Languages;
-import org.b3log.symphony.util.Sessions;
-import org.b3log.symphony.util.Symphonys;
+import org.b3log.symphony.util.*;
 import org.json.JSONObject;
 
 import java.util.*;
@@ -80,16 +75,16 @@ import java.util.*;
  * </ul>
  *
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
- * @version 1.3.2.4, Sep 6, 2019
+ * @version 2.0.0.1, May 30, 2020
  * @since 2.4.0
  */
-@RequestProcessor
+@Singleton
 public class SettingsProcessor {
 
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(SettingsProcessor.class);
+    private static final Logger LOGGER = LogManager.getLogger(SettingsProcessor.class);
 
     /**
      * Post export service.
@@ -188,14 +183,43 @@ public class SettingsProcessor {
     private PointtransferMgmtService pointtransferMgmtService;
 
     /**
+     * Register request handlers.
+     */
+    public static void register() {
+        final BeanManager beanManager = BeanManager.getInstance();
+        final LoginCheckMidware loginCheck = beanManager.getReference(LoginCheckMidware.class);
+        final CSRFMidware csrfMidware = beanManager.getReference(CSRFMidware.class);
+        final UpdateProfilesValidationMidware updateProfilesValidationMidware = beanManager.getReference(UpdateProfilesValidationMidware.class);
+        final UpdatePasswordValidationMidware updatePasswordValidationMidware = beanManager.getReference(UpdatePasswordValidationMidware.class);
+        final PointTransferValidationMidware pointTransferValidationMidware = beanManager.getReference(PointTransferValidationMidware.class);
+
+        final SettingsProcessor settingsProcessor = beanManager.getReference(SettingsProcessor.class);
+        Dispatcher.post("/settings/deactivate", settingsProcessor::deactivateUser, loginCheck::handle);
+        Dispatcher.post("/settings/username", settingsProcessor::updateUserName, loginCheck::handle);
+        Dispatcher.post("/settings/email/vc", settingsProcessor::sendEmailVC, loginCheck::handle);
+        Dispatcher.post("/settings/email", settingsProcessor::updateEmail, loginCheck::handle);
+        Dispatcher.post("/settings/i18n", settingsProcessor::updateI18n, loginCheck::handle, csrfMidware::check);
+        Dispatcher.group().middlewares(loginCheck::handle, csrfMidware::fill).router().get().uris(new String[]{"/settings", "/settings/{page}"}).handler(settingsProcessor::showSettings);
+        Dispatcher.post("/settings/geo/status", settingsProcessor::updateGeoStatus, loginCheck::handle, csrfMidware::check);
+        Dispatcher.post("/settings/privacy", settingsProcessor::updatePrivacy, loginCheck::handle, csrfMidware::check);
+        Dispatcher.post("/settings/function", settingsProcessor::updateFunction, loginCheck::handle, csrfMidware::check);
+        Dispatcher.post("/settings/profiles", settingsProcessor::updateProfiles, loginCheck::handle, csrfMidware::check, updateProfilesValidationMidware::handle);
+        Dispatcher.post("/settings/avatar", settingsProcessor::updateAvatar, loginCheck::handle, csrfMidware::check, updateProfilesValidationMidware::handle);
+        Dispatcher.post("/settings/password", settingsProcessor::updatePassword, loginCheck::handle, csrfMidware::check, updatePasswordValidationMidware::handle);
+        Dispatcher.post("/settings/emotionList", settingsProcessor::updateEmoji, loginCheck::handle, csrfMidware::check);
+        Dispatcher.post("/invitecode/state", settingsProcessor::queryInvitecode, loginCheck::handle, csrfMidware::check);
+        Dispatcher.post("/point/buy-invitecode", settingsProcessor::pointBuy, loginCheck::handle, csrfMidware::check);
+        Dispatcher.post("/export/posts", settingsProcessor::exportPosts, loginCheck::handle);
+        Dispatcher.post("/point/transfer", settingsProcessor::pointTransfer, loginCheck::handle, csrfMidware::check, pointTransferValidationMidware::handle);
+    }
+
+    /**
      * Deactivates user.
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/settings/deactivate", method = HttpMethod.POST)
-    @Before({LoginCheck.class})
     public void deactivateUser(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         final Response response = context.getResponse();
         final JSONObject currentUser = Sessions.getUser();
@@ -203,7 +227,7 @@ public class SettingsProcessor {
             userMgmtService.deactivateUser(currentUser.optString(Keys.OBJECT_ID));
             Sessions.logout(currentUser.optString(Keys.OBJECT_ID), response);
 
-            context.renderTrueResult();
+            context.renderJSON(StatusCodes.SUCC);
         } catch (final Exception e) {
             context.renderMsg(e.getMessage());
         }
@@ -214,10 +238,8 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/settings/username", method = HttpMethod.POST)
-    @Before({LoginCheck.class})
     public void updateUserName(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         final JSONObject requestJSONObject = context.requestJSON();
         final JSONObject currentUser = Sessions.getUser();
@@ -238,7 +260,7 @@ public class SettingsProcessor {
                     Pointtransfer.TRANSFER_TYPE_C_CHANGE_USERNAME, Pointtransfer.TRANSFER_SUM_C_CHANGE_USERNAME,
                     oldName + "-" + newName, System.currentTimeMillis(), "");
 
-            context.renderTrueResult();
+            context.renderJSON(StatusCodes.SUCC);
         } catch (final ServiceException e) {
             context.renderMsg(e.getMessage());
         }
@@ -249,18 +271,14 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/settings/email/vc", method = HttpMethod.POST)
-    @Before({LoginCheck.class})
     public void sendEmailVC(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
-        final Request request = context.getRequest();
         final JSONObject requestJSONObject = context.requestJSON();
         final String email = StringUtils.lowerCase(StringUtils.trim(requestJSONObject.optString(User.USER_EMAIL)));
         if (!Strings.isEmail(email)) {
             final String msg = langPropsService.get("sendFailedLabel") + " - " + langPropsService.get("invalidEmailLabel");
             context.renderMsg(msg);
-
             return;
         }
 
@@ -268,7 +286,6 @@ public class SettingsProcessor {
         if (CaptchaProcessor.invalidCaptcha(captcha)) {
             final String msg = langPropsService.get("sendFailedLabel") + " - " + langPropsService.get("captchaErrorLabel");
             context.renderMsg(msg);
-
             return;
         }
 
@@ -276,7 +293,6 @@ public class SettingsProcessor {
         if (email.equalsIgnoreCase(user.optString(User.USER_EMAIL))) {
             final String msg = langPropsService.get("sendFailedLabel") + " - " + langPropsService.get("bindedLabel");
             context.renderMsg(msg);
-
             return;
         }
 
@@ -284,14 +300,12 @@ public class SettingsProcessor {
         try {
             JSONObject verifycode = verifycodeQueryService.getVerifycodeByUserId(Verifycode.TYPE_C_EMAIL, Verifycode.BIZ_TYPE_C_BIND_EMAIL, userId);
             if (null != verifycode) {
-                context.renderTrueResult().renderMsg(langPropsService.get("vcSentLabel"));
-
+                context.renderJSON(StatusCodes.SUCC).renderMsg(langPropsService.get("vcSentLabel"));
                 return;
             }
 
             if (null != userQueryService.getUserByEmail(email)) {
                 context.renderMsg(langPropsService.get("duplicatedEmailLabel"));
-
                 return;
             }
 
@@ -306,7 +320,7 @@ public class SettingsProcessor {
             verifycode.put(Verifycode.RECEIVER, email);
             verifycodeMgmtService.addVerifycode(verifycode);
 
-            context.renderTrueResult().renderMsg(langPropsService.get("verifycodeSentLabel"));
+            context.renderJSON(StatusCodes.SUCC).renderMsg(langPropsService.get("verifycodeSentLabel"));
         } catch (final ServiceException e) {
             context.renderMsg(e.getMessage());
         }
@@ -317,10 +331,8 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/settings/email", method = HttpMethod.POST)
-    @Before({LoginCheck.class})
     public void updateEmail(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         final Request request = context.getRequest();
         final JSONObject requestJSONObject = context.requestJSON();
@@ -333,7 +345,6 @@ public class SettingsProcessor {
                 final String msg = langPropsService.get("updateFailLabel") + " - " + langPropsService.get("captchaErrorLabel");
                 context.renderMsg(msg);
                 context.renderJSONValue(Keys.CODE, 2);
-
                 return;
             }
 
@@ -341,7 +352,6 @@ public class SettingsProcessor {
                 final String msg = langPropsService.get("updateFailLabel") + " - " + langPropsService.get("captchaErrorLabel");
                 context.renderMsg(msg);
                 context.renderJSONValue(Keys.CODE, 2);
-
                 return;
             }
 
@@ -351,7 +361,7 @@ public class SettingsProcessor {
             userMgmtService.updateUserEmail(userId, user);
             verifycodeMgmtService.removeByCode(captcha);
 
-            context.renderTrueResult();
+            context.renderJSON(StatusCodes.SUCC);
         } catch (final ServiceException e) {
             context.renderMsg(e.getMessage());
         }
@@ -362,10 +372,8 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/settings/i18n", method = HttpMethod.POST)
-    @Before({LoginCheck.class, CSRFCheck.class})
     public void updateI18n(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         final Request request = context.getRequest();
         JSONObject requestJSONObject;
@@ -398,7 +406,7 @@ public class SettingsProcessor {
 
             userMgmtService.updateUser(user.optString(Keys.OBJECT_ID), user);
 
-            context.renderTrueResult();
+            context.renderJSON(StatusCodes.SUCC);
         } catch (final ServiceException e) {
             context.renderMsg(e.getMessage());
         }
@@ -409,9 +417,6 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = {"/settings", "/settings/{page}"}, method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, LoginCheck.class})
-    @After({CSRFToken.class, PermissionGrant.class, StopwatchEndAdvice.class})
     public void showSettings(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, null);
         context.setRenderer(renderer);
@@ -505,10 +510,8 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/settings/geo/status", method = HttpMethod.POST)
-    @Before({LoginCheck.class, CSRFCheck.class})
     public void updateGeoStatus(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         final Request request = context.getRequest();
         JSONObject requestJSONObject;
@@ -534,7 +537,7 @@ public class SettingsProcessor {
 
             userMgmtService.updateUser(user.optString(Keys.OBJECT_ID), user);
 
-            context.renderTrueResult();
+            context.renderJSON(StatusCodes.SUCC);
         } catch (final ServiceException e) {
             context.renderMsg(e.getMessage());
         }
@@ -545,10 +548,8 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/settings/privacy", method = HttpMethod.POST)
-    @Before({LoginCheck.class, CSRFCheck.class})
     public void updatePrivacy(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         final Request request = context.getRequest();
         JSONObject requestJSONObject;
@@ -596,7 +597,7 @@ public class SettingsProcessor {
         try {
             userMgmtService.updateUser(user.optString(Keys.OBJECT_ID), user);
 
-            context.renderTrueResult();
+            context.renderJSON(StatusCodes.SUCC);
         } catch (final ServiceException e) {
             context.renderMsg(e.getMessage());
         }
@@ -607,10 +608,8 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/settings/function", method = HttpMethod.POST)
-    @Before({LoginCheck.class, CSRFCheck.class})
     public void updateFunction(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         final Request request = context.getRequest();
         JSONObject requestJSONObject;
@@ -638,7 +637,6 @@ public class SettingsProcessor {
         }
         if (StringUtils.isNotBlank(indexRedirectURL) && !StringUtils.startsWith(indexRedirectURL, Latkes.getServePath())) {
             context.renderMsg(langPropsService.get("onlyInternalURLLabel"));
-
             return;
         }
         if (StringUtils.isNotBlank(indexRedirectURL)) {
@@ -682,7 +680,7 @@ public class SettingsProcessor {
         try {
             userMgmtService.updateUser(user.optString(Keys.OBJECT_ID), user);
 
-            context.renderTrueResult();
+            context.renderJSON(StatusCodes.SUCC);
         } catch (final ServiceException e) {
             context.renderMsg(e.getMessage());
         }
@@ -693,10 +691,8 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/settings/profiles", method = HttpMethod.POST)
-    @Before({LoginCheck.class, CSRFCheck.class, UpdateProfilesValidation.class})
     public void updateProfiles(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
         final JSONObject requestJSONObject = (JSONObject) context.attr(Keys.REQUEST);
         final String userTags = requestJSONObject.optString(UserExt.USER_TAGS);
         final String userURL = requestJSONObject.optString(User.USER_URL);
@@ -717,7 +713,7 @@ public class SettingsProcessor {
         try {
             userMgmtService.updateProfiles(user);
 
-            context.renderTrueResult();
+            context.renderJSON(StatusCodes.SUCC);
         } catch (final ServiceException e) {
             context.renderMsg(e.getMessage());
         }
@@ -728,13 +724,10 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/settings/avatar", method = HttpMethod.POST)
-    @Before({LoginCheck.class, CSRFCheck.class, UpdateProfilesValidation.class})
     public void updateAvatar(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
-        final Request request = context.getRequest();
-        final JSONObject requestJSONObject = (JSONObject) context.attr(Keys.REQUEST);
+        final JSONObject requestJSONObject = context.requestJSON();
         final String userAvatarURL = requestJSONObject.optString(UserExt.USER_AVATAR_URL);
 
         JSONObject user = Sessions.getUser();
@@ -762,7 +755,7 @@ public class SettingsProcessor {
         try {
             userMgmtService.updateUser(user.optString(Keys.OBJECT_ID), user);
 
-            context.renderTrueResult();
+            context.renderJSON(StatusCodes.SUCC);
         } catch (final ServiceException e) {
             context.renderMsg(e.getMessage());
         }
@@ -773,21 +766,16 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/settings/password", method = HttpMethod.POST)
-    @Before({LoginCheck.class, CSRFCheck.class, UpdatePasswordValidation.class})
     public void updatePassword(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
-        final Request request = context.getRequest();
-        final JSONObject requestJSONObject = (JSONObject) context.attr(Keys.REQUEST);
-
+        final JSONObject requestJSONObject = context.requestJSON();
         final String password = requestJSONObject.optString(User.USER_PASSWORD);
         final String newPassword = requestJSONObject.optString(User.USER_NEW_PASSWORD);
 
         final JSONObject user = Sessions.getUser();
         if (!password.equals(user.optString(User.USER_PASSWORD))) {
             context.renderMsg(langPropsService.get("invalidOldPwdLabel"));
-
             return;
         }
 
@@ -795,7 +783,7 @@ public class SettingsProcessor {
 
         try {
             userMgmtService.updatePassword(user);
-            context.renderTrueResult();
+            context.renderJSON(StatusCodes.SUCC);
         } catch (final ServiceException e) {
             final String msg = langPropsService.get("updateFailLabel") + " - " + e.getMessage();
             LOGGER.log(Level.ERROR, msg, e);
@@ -809,10 +797,8 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/settings/emotionList", method = HttpMethod.POST)
-    @Before({LoginCheck.class, CSRFCheck.class})
     public void updateEmoji(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         final JSONObject requestJSONObject = context.requestJSON();
         final String emotionList = requestJSONObject.optString(Emotion.EMOTIONS);
@@ -821,7 +807,7 @@ public class SettingsProcessor {
         try {
             emotionMgmtService.setEmotionList(user.optString(Keys.OBJECT_ID), emotionList);
 
-            context.renderTrueResult();
+            context.renderJSON(StatusCodes.SUCC);
         } catch (final ServiceException e) {
             final String msg = langPropsService.get("updateFailLabel") + " - " + e.getMessage();
             LOGGER.log(Level.ERROR, msg, e);
@@ -835,13 +821,10 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/point/transfer", method = HttpMethod.POST)
-    @Before({LoginCheck.class, CSRFCheck.class, PointTransferValidation.class})
     public void pointTransfer(final RequestContext context) {
-        final JSONObject ret = new JSONObject().put(Keys.STATUS_CODE, false);
+        final JSONObject ret = new JSONObject().put(Keys.CODE, StatusCodes.ERR);
         context.renderJSON(ret);
 
-        final Request request = context.getRequest();
         final JSONObject requestJSONObject = (JSONObject) context.attr(Keys.REQUEST);
 
         final int amount = requestJSONObject.optInt(Common.AMOUNT);
@@ -858,7 +841,9 @@ public class SettingsProcessor {
         final String transferId = pointtransferMgmtService.transfer(fromId, toId,
                 Pointtransfer.TRANSFER_TYPE_C_ACCOUNT2ACCOUNT, amount, toId, System.currentTimeMillis(), memo);
         final boolean succ = null != transferId;
-        ret.put(Keys.STATUS_CODE, succ);
+        if (succ) {
+            ret.put(Keys.CODE, StatusCodes.SUCC);
+        }
         if (!succ) {
             ret.put(Keys.MSG, langPropsService.get("transferFailLabel"));
         } else {
@@ -875,18 +860,15 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/invitecode/state", method = HttpMethod.POST)
-    @Before({LoginCheck.class, CSRFCheck.class})
     public void queryInvitecode(final RequestContext context) {
-        final JSONObject ret = new JSONObject().put(Keys.STATUS_CODE, false);
+        final JSONObject ret = new JSONObject().put(Keys.CODE, StatusCodes.ERR);
         context.renderJSON(ret);
 
         final JSONObject requestJSONObject = context.requestJSON();
         String invitecode = requestJSONObject.optString(Invitecode.INVITECODE);
         if (StringUtils.isBlank(invitecode)) {
-            ret.put(Keys.STATUS_CODE, -1);
+            ret.put(Keys.CODE, -1);
             ret.put(Keys.MSG, invitecode + " " + langPropsService.get("notFoundInvitecodeLabel"));
-
             return;
         }
 
@@ -895,16 +877,15 @@ public class SettingsProcessor {
         final JSONObject result = invitecodeQueryService.getInvitecode(invitecode);
 
         if (null == result) {
-            ret.put(Keys.STATUS_CODE, -1);
+            ret.put(Keys.CODE, -1);
             ret.put(Keys.MSG, langPropsService.get("notFoundInvitecodeLabel"));
         } else {
             final int status = result.optInt(Invitecode.STATUS);
-            ret.put(Keys.STATUS_CODE, status);
+            ret.put(Keys.CODE, status);
 
             switch (status) {
                 case Invitecode.STATUS_C_USED:
                     ret.put(Keys.MSG, langPropsService.get("invitecodeUsedLabel"));
-
                     break;
                 case Invitecode.STATUS_C_UNUSED:
                     String msg = langPropsService.get("invitecodeOkLabel");
@@ -912,11 +893,9 @@ public class SettingsProcessor {
                             + Symphonys.INVITECODE_EXPIRED, "yyyy-MM-dd HH:mm"));
 
                     ret.put(Keys.MSG, msg);
-
                     break;
                 case Invitecode.STATUS_C_STOPUSE:
                     ret.put(Keys.MSG, langPropsService.get("invitecodeStopLabel"));
-
                     break;
                 default:
                     ret.put(Keys.MSG, langPropsService.get("notFoundInvitecodeLabel"));
@@ -929,10 +908,8 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/point/buy-invitecode", method = HttpMethod.POST)
-    @Before({LoginCheck.class, CSRFCheck.class, PermissionCheck.class})
     public void pointBuy(final RequestContext context) {
-        final JSONObject ret = new JSONObject().put(Keys.STATUS_CODE, false);
+        final JSONObject ret = new JSONObject().put(Keys.CODE, StatusCodes.ERR);
         context.renderJSON(ret);
 
         final String allowRegister = optionQueryService.getAllowRegister();
@@ -953,7 +930,9 @@ public class SettingsProcessor {
                 Pointtransfer.TRANSFER_TYPE_C_BUY_INVITECODE, Pointtransfer.TRANSFER_SUM_C_BUY_INVITECODE,
                 invitecode, System.currentTimeMillis(), "");
         final boolean succ = null != transferId;
-        ret.put(Keys.STATUS_CODE, succ);
+        if (succ) {
+            ret.put(Keys.CODE, StatusCodes.SUCC);
+        }
         if (!succ) {
             ret.put(Keys.MSG, langPropsService.get("exchangeFailedLabel"));
         } else {
@@ -969,10 +948,8 @@ public class SettingsProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/export/posts", method = HttpMethod.POST)
-    @Before({LoginCheck.class})
     public void exportPosts(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         final JSONObject user = Sessions.getUser();
         final String userId = user.optString(Keys.OBJECT_ID);
@@ -985,7 +962,7 @@ public class SettingsProcessor {
             return;
         }
 
-        context.renderJSON(true).renderJSONValue("url", downloadURL);
+        context.renderJSON(StatusCodes.SUCC).renderJSONValue("url", downloadURL);
     }
 
     private static final String[][] emojiLists = {{

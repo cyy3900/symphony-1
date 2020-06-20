@@ -19,23 +19,26 @@ package org.b3log.symphony.service;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.time.DateFormatUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.Latkes;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.model.Pagination;
 import org.b3log.latke.model.User;
 import org.b3log.latke.repository.*;
 import org.b3log.latke.service.LangPropsService;
 import org.b3log.latke.service.annotation.Service;
-import org.b3log.latke.util.*;
+import org.b3log.latke.util.Locales;
+import org.b3log.latke.util.Paginator;
+import org.b3log.latke.util.Stopwatchs;
+import org.b3log.latke.util.Times;
 import org.b3log.symphony.model.*;
 import org.b3log.symphony.repository.ArticleRepository;
 import org.b3log.symphony.repository.CommentRepository;
 import org.b3log.symphony.repository.UserRepository;
 import org.b3log.symphony.util.*;
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.*;
@@ -55,7 +58,7 @@ public class CommentQueryService {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(CommentQueryService.class);
+    private static final Logger LOGGER = LogManager.getLogger(CommentQueryService.class);
 
     /**
      * Revision query service.
@@ -153,10 +156,9 @@ public class CommentQueryService {
                     .setFilter(CompositeFilterOperator.and(
                             new PropertyFilter(Comment.COMMENT_ON_ARTICLE_ID, FilterOperator.EQUAL, articleId),
                             new PropertyFilter(Comment.COMMENT_QNA_OFFERED, FilterOperator.EQUAL, Comment.COMMENT_QNA_OFFERED_C_YES),
-                            new PropertyFilter(Comment.COMMENT_STATUS, FilterOperator.EQUAL, Comment.COMMENT_STATUS_C_VALID)
-                    ));
+                            new PropertyFilter(Comment.COMMENT_STATUS, FilterOperator.EQUAL, Comment.COMMENT_STATUS_C_VALID)));
             try {
-                final List<JSONObject> comments = CollectionUtils.jsonArrayToList(commentRepository.get(query).optJSONArray(Keys.RESULTS));
+                final List<JSONObject> comments = commentRepository.getList(query);
                 if (comments.isEmpty()) {
                     return null;
                 }
@@ -167,11 +169,9 @@ public class CommentQueryService {
                 final int pageSize = Symphonys.ARTICLE_COMMENTS_CNT;
                 ret.put(Pagination.PAGINATION_CURRENT_PAGE_NUM, getCommentPage(
                         articleId, ret.optString(Keys.OBJECT_ID), commentViewMode, pageSize));
-
                 return ret;
             } catch (final RepositoryException e) {
                 LOGGER.log(Level.ERROR, "Gets accepted comment failed", e);
-
                 return null;
             }
         } finally {
@@ -197,14 +197,12 @@ public class CommentQueryService {
                         new PropertyFilter(Comment.COMMENT_ON_ARTICLE_ID, FilterOperator.EQUAL, articleId),
                         new PropertyFilter(Keys.OBJECT_ID, FilterOperator.LESS_THAN, commentId)
                 )).addSort(Keys.OBJECT_ID, SortDirection.ASCENDING);
-
                 break;
             case UserExt.USER_COMMENT_VIEW_MODE_C_REALTIME:
                 numQuery.setFilter(CompositeFilterOperator.and(
                         new PropertyFilter(Comment.COMMENT_ON_ARTICLE_ID, FilterOperator.EQUAL, articleId),
                         new PropertyFilter(Keys.OBJECT_ID, FilterOperator.GREATER_THAN, commentId)
                 )).addSort(Keys.OBJECT_ID, SortDirection.DESCENDING);
-
                 break;
         }
 
@@ -289,16 +287,11 @@ public class CommentQueryService {
                 setPage(1, Integer.MAX_VALUE).setPageCount(1).
                 setFilter(CompositeFilterOperator.and(
                         new PropertyFilter(Comment.COMMENT_ORIGINAL_COMMENT_ID, FilterOperator.EQUAL, commentId),
-                        new PropertyFilter(Comment.COMMENT_STATUS, FilterOperator.EQUAL, Comment.COMMENT_STATUS_C_VALID)
-                ));
+                        new PropertyFilter(Comment.COMMENT_STATUS, FilterOperator.EQUAL, Comment.COMMENT_STATUS_C_VALID)));
         try {
-            final List<JSONObject> comments = CollectionUtils.jsonArrayToList(
-                    commentRepository.get(query).optJSONArray(Keys.RESULTS));
-
+            final List<JSONObject> comments = commentRepository.getList(query);
             organizeComments(comments);
-
             final int pageSize = Symphonys.ARTICLE_COMMENTS_CNT;
-
             final List<JSONObject> ret = new ArrayList<>();
             for (final JSONObject comment : comments) {
                 final JSONObject reply = new JSONObject();
@@ -360,16 +353,11 @@ public class CommentQueryService {
                     setFilter(CompositeFilterOperator.and(
                             new PropertyFilter(Comment.COMMENT_ON_ARTICLE_ID, FilterOperator.EQUAL, articleId),
                             new PropertyFilter(Comment.COMMENT_SCORE, FilterOperator.GREATER_THAN, 0D),
-                            new PropertyFilter(Comment.COMMENT_STATUS, FilterOperator.EQUAL, Comment.COMMENT_STATUS_C_VALID)
-                    ));
+                            new PropertyFilter(Comment.COMMENT_STATUS, FilterOperator.EQUAL, Comment.COMMENT_STATUS_C_VALID)));
             try {
-                final List<JSONObject> ret = CollectionUtils.jsonArrayToList(
-                        commentRepository.get(query).optJSONArray(Keys.RESULTS));
-
+                final List<JSONObject> ret = commentRepository.getList(query);
                 organizeComments(ret);
-
                 final int pageSize = Symphonys.ARTICLE_COMMENTS_CNT;
-
                 for (final JSONObject comment : ret) {
                     comment.put(Pagination.PAGINATION_CURRENT_PAGE_NUM, getCommentPage(
                             articleId, comment.optString(Keys.OBJECT_ID),
@@ -379,7 +367,6 @@ public class CommentQueryService {
                 return ret;
             } catch (final RepositoryException e) {
                 LOGGER.log(Level.ERROR, "Get nice comments failed", e);
-
                 return Collections.emptyList();
             }
         } finally {
@@ -472,9 +459,6 @@ public class CommentQueryService {
     public JSONObject getComment(final String commentId) {
         try {
             final JSONObject ret = commentRepository.get(commentId);
-            if (null == ret) {
-                return null;
-            }
 
             return ret;
         } catch (final RepositoryException e) {
@@ -504,7 +488,7 @@ public class CommentQueryService {
                         new PropertyFilter(Comment.COMMENT_STATUS, FilterOperator.EQUAL, Comment.COMMENT_STATUS_C_VALID)));
         try {
             final JSONObject result = commentRepository.get(query);
-            final List<JSONObject> ret = CollectionUtils.jsonArrayToList(result.optJSONArray(Keys.RESULTS));
+            final List<JSONObject> ret = (List<JSONObject>) result.opt(Keys.RESULTS);
             if (ret.isEmpty()) {
                 return ret;
             }
@@ -578,7 +562,6 @@ public class CommentQueryService {
                             for (final String userName : userNames) {
                                 if (userName.equals(viewerUserName)) {
                                     invited = true;
-
                                     break;
                                 }
                             }
@@ -637,8 +620,7 @@ public class CommentQueryService {
             } finally {
                 Stopwatchs.end();
             }
-            final List<JSONObject> ret = CollectionUtils.jsonArrayToList(result.optJSONArray(Keys.RESULTS));
-
+            final List<JSONObject> ret = (List<JSONObject>) result.opt(Keys.RESULTS);
             organizeComments(ret);
 
             Stopwatchs.start("Revision, paging, original");
@@ -729,28 +711,22 @@ public class CommentQueryService {
             result = commentRepository.get(query);
         } catch (final RepositoryException e) {
             LOGGER.log(Level.ERROR, "Gets comments failed", e);
-
             return null;
         }
 
         final int pageCount = result.optJSONObject(Pagination.PAGINATION).optInt(Pagination.PAGINATION_PAGE_COUNT);
-
         final JSONObject pagination = new JSONObject();
         ret.put(Pagination.PAGINATION, pagination);
         final List<Integer> pageNums = Paginator.paginate(currentPageNum, pageSize, pageCount, windowSize);
         pagination.put(Pagination.PAGINATION_PAGE_COUNT, pageCount);
         pagination.put(Pagination.PAGINATION_PAGE_NUMS, pageNums);
 
-        final JSONArray data = result.optJSONArray(Keys.RESULTS);
-        final List<JSONObject> comments = CollectionUtils.jsonArrayToList(data);
-
+        final List<JSONObject> comments = (List<JSONObject>) result.opt(Keys.RESULTS);
         try {
             for (final JSONObject comment : comments) {
                 organizeComment(comment);
-
                 final String articleId = comment.optString(Comment.COMMENT_ON_ARTICLE_ID);
                 final JSONObject article = articleRepository.get(articleId);
-
                 comment.put(Comment.COMMENT_T_ARTICLE_TITLE,
                         Article.ARTICLE_STATUS_C_INVALID == article.optInt(Article.ARTICLE_STATUS)
                                 ? langPropsService.get("articleTitleBlockLabel")
@@ -759,12 +735,10 @@ public class CommentQueryService {
             }
         } catch (final RepositoryException e) {
             LOGGER.log(Level.ERROR, "Organizes comments failed", e);
-
             return null;
         }
 
-        ret.put(Comment.COMMENTS, comments);
-
+        ret.put(Comment.COMMENTS, (Object) comments);
         return ret;
     }
 
@@ -788,7 +762,7 @@ public class CommentQueryService {
                 } catch (final Exception e) {
                     LOGGER.log(Level.ERROR, "Organizes comment [" + comment.optString(Keys.OBJECT_ID) + "] failed", e);
                 } finally {
-                    // LOGGER.log(Level.INFO, "Stopwatch: {0}{1}", Strings.LINE_SEPARATOR, Stopwatchs.getTimingStat());
+                    // LOGGER.log(Level.INFO, "Stopwatch: {}{}", Strings.LINE_SEPARATOR, Stopwatchs.getTimingStat());
                     Stopwatchs.release();
                 }
             }));
@@ -871,7 +845,6 @@ public class CommentQueryService {
         if (Comment.COMMENT_STATUS_C_INVALID == comment.optInt(Comment.COMMENT_STATUS)
                 || UserExt.USER_STATUS_C_INVALID == commenter.optInt(UserExt.USER_STATUS)) {
             comment.put(Comment.COMMENT_CONTENT, langPropsService.get("commentContentBlockLabel"));
-
             return;
         }
 
@@ -881,8 +854,8 @@ public class CommentQueryService {
         commentContent = Emotions.convert(commentContent);
         commentContent = Markdowns.toHTML(commentContent);
         commentContent = Markdowns.clean(commentContent, "");
-        commentContent = MP3Players.render(commentContent);
-        commentContent = VideoPlayers.render(commentContent);
+        commentContent = MediaPlayers.renderAudio(commentContent);
+        commentContent = MediaPlayers.renderVideo(commentContent);
         comment.put(Comment.COMMENT_CONTENT, commentContent);
     }
 }

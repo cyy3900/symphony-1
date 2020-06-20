@@ -19,13 +19,11 @@ package org.b3log.symphony.repository;
 
 import org.b3log.latke.Keys;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.repository.*;
 import org.b3log.latke.repository.annotation.Repository;
 import org.b3log.latke.util.URLs;
 import org.b3log.symphony.cache.TagCache;
 import org.b3log.symphony.model.Tag;
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
@@ -40,11 +38,6 @@ import java.util.List;
  */
 @Repository
 public class TagRepository extends AbstractRepository {
-
-    /**
-     * Logger.
-     */
-    private static final Logger LOGGER = Logger.getLogger(TagRepository.class);
 
     /**
      * Tag cache.
@@ -126,17 +119,9 @@ public class TagRepository extends AbstractRepository {
      */
     public JSONObject getByURI(final String tagURI) throws RepositoryException {
         final String uri = URLs.encode(tagURI);
-        final Query query = new Query().setFilter(new PropertyFilter(Tag.TAG_URI, FilterOperator.EQUAL, uri))
-                .addSort(Tag.TAG_REFERENCE_CNT, SortDirection.DESCENDING)
-                .setPageCount(1);
-        final JSONObject result = get(query);
-        final JSONArray array = result.optJSONArray(Keys.RESULTS);
-
-        if (0 == array.length()) {
-            return null;
-        }
-
-        return array.optJSONObject(0);
+        final Query query = new Query().setFilter(new PropertyFilter(Tag.TAG_URI, FilterOperator.EQUAL, uri)).
+                addSort(Tag.TAG_REFERENCE_CNT, SortDirection.DESCENDING).setPageCount(1);
+        return getFirst(query);
     }
 
     /**
@@ -148,15 +133,7 @@ public class TagRepository extends AbstractRepository {
      */
     public JSONObject getByTitle(final String tagTitle) throws RepositoryException {
         final Query query = new Query().setFilter(new PropertyFilter(Tag.TAG_TITLE, FilterOperator.EQUAL, tagTitle)).setPageCount(1);
-
-        final JSONObject result = get(query);
-        final JSONArray array = result.optJSONArray(Keys.RESULTS);
-
-        if (0 == array.length()) {
-            return null;
-        }
-
-        return array.optJSONObject(0);
+        return getFirst(query);
     }
 
     /**

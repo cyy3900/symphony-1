@@ -18,10 +18,11 @@
 package org.b3log.symphony.service;
 
 import org.apache.commons.lang.RandomStringUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.repository.*;
 import org.b3log.latke.repository.annotation.Transactional;
 import org.b3log.latke.service.ServiceException;
@@ -30,8 +31,9 @@ import org.b3log.symphony.model.Invitecode;
 import org.b3log.symphony.model.Pointtransfer;
 import org.b3log.symphony.repository.InvitecodeRepository;
 import org.b3log.symphony.util.Symphonys;
-import org.json.JSONArray;
 import org.json.JSONObject;
+
+import java.util.List;
 
 /**
  * Invitecode management service.
@@ -46,7 +48,7 @@ public class InvitecodeMgmtService {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(InvitecodeMgmtService.class);
+    private static final Logger LOGGER = LogManager.getLogger(InvitecodeMgmtService.class);
 
     /**
      * Invitecode repository.
@@ -74,17 +76,13 @@ public class InvitecodeMgmtService {
             result = invitecodeRepository.get(query);
         } catch (final RepositoryException e) {
             LOGGER.log(Level.ERROR, "Gets invitecodes failed", e);
-
             return;
         }
 
-        final JSONArray data = result.optJSONArray(Keys.RESULTS);
-
+        final List<JSONObject> data = (List<JSONObject>) result.opt(Keys.RESULTS);
         try {
-            for (int i = 0; i < data.length(); i++) {
-                final JSONObject invitecode = data.optJSONObject(i);
+            for (final JSONObject invitecode : data) {
                 final String invitecodeId = invitecode.optString(Keys.OBJECT_ID);
-
                 invitecodeRepository.remove(invitecodeId);
             }
         } catch (final Exception e) {

@@ -19,6 +19,9 @@ package org.b3log.symphony.util;
 
 import org.apache.commons.lang.RandomStringUtils;
 import org.apache.commons.lang.StringUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.Latkes;
 import org.b3log.latke.cache.Cache;
@@ -28,8 +31,6 @@ import org.b3log.latke.http.Request;
 import org.b3log.latke.http.RequestContext;
 import org.b3log.latke.http.Response;
 import org.b3log.latke.ioc.BeanManager;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.model.User;
 import org.b3log.latke.util.Crypts;
 import org.b3log.latke.util.Requests;
@@ -45,14 +46,14 @@ import java.util.Set;
  * Session utilities.
  *
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
- * @version 2.1.1.0, Jan 22, 2019
+ * @version 2.1.2.0, May 31, 2020
  */
 public final class Sessions {
 
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(Sessions.class);
+    private static final Logger LOGGER = LogManager.getLogger(Sessions.class);
 
     /**
      * Session cache.
@@ -103,7 +104,6 @@ public final class Sessions {
         if (null == data) {
             data = new JSONObject().put(Keys.HttpRequest.IS_SEARCH_ENGINE_BOT, isBot);
             THREAD_LOCAL_DATA.set(data);
-
             return;
         }
 
@@ -134,7 +134,6 @@ public final class Sessions {
         if (null == data) {
             data = new JSONObject().put(Common.IS_MOBILE, isMobile);
             THREAD_LOCAL_DATA.set(data);
-
             return;
         }
 
@@ -165,7 +164,6 @@ public final class Sessions {
         if (null == data) {
             data = new JSONObject().put(UserExt.USER_AVATAR_VIEW_MODE, avatarViewMode);
             THREAD_LOCAL_DATA.set(data);
-
             return;
         }
 
@@ -196,7 +194,6 @@ public final class Sessions {
         if (null == data) {
             data = new JSONObject().put(Common.IS_LOGGED_IN, isLoggedIn);
             THREAD_LOCAL_DATA.set(data);
-
             return;
         }
 
@@ -227,7 +224,6 @@ public final class Sessions {
         if (null == data) {
             data = new JSONObject().put(User.USER, user);
             THREAD_LOCAL_DATA.set(data);
-
             return;
         }
 
@@ -245,7 +241,7 @@ public final class Sessions {
             return "classic";
         }
 
-        return data.optString(Keys.TEMAPLTE_DIR_NAME);
+        return data.optString(Keys.TEMPLATE_DIR_NAME);
     }
 
     /**
@@ -256,13 +252,12 @@ public final class Sessions {
     public static void setTemplateDir(final String templateDir) {
         JSONObject data = THREAD_LOCAL_DATA.get();
         if (null == data) {
-            data = new JSONObject().put(Keys.TEMAPLTE_DIR_NAME, templateDir);
+            data = new JSONObject().put(Keys.TEMPLATE_DIR_NAME, templateDir);
             THREAD_LOCAL_DATA.set(data);
-
             return;
         }
 
-        data.put(Keys.TEMAPLTE_DIR_NAME, templateDir);
+        data.put(Keys.TEMPLATE_DIR_NAME, templateDir);
     }
 
     /**
@@ -335,8 +330,10 @@ public final class Sessions {
             final String ret = Crypts.encryptByAES(cookieJSONObject.toString(), Symphonys.COOKIE_SECRET);
             final Cookie cookie = new Cookie(COOKIE_NAME, ret);
             cookie.setPath("/");
-            cookie.setMaxAge(rememberLogin ? COOKIE_EXPIRY : -1);
-            cookie.setHttpOnly(true); // HTTP Only
+            if (rememberLogin) {
+                cookie.setMaxAge(COOKIE_EXPIRY);
+            }
+            cookie.setHttpOnly(true);
             cookie.setSecure(StringUtils.equalsIgnoreCase(Latkes.getServerScheme(), "https"));
 
             response.addCookie(cookie);

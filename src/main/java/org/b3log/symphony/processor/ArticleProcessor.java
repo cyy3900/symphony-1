@@ -21,18 +21,17 @@ import jodd.util.Base64;
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.time.DateUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
-import org.b3log.latke.http.HttpMethod;
+import org.b3log.latke.http.Dispatcher;
 import org.b3log.latke.http.Request;
 import org.b3log.latke.http.RequestContext;
-import org.b3log.latke.http.annotation.After;
-import org.b3log.latke.http.annotation.Before;
-import org.b3log.latke.http.annotation.RequestProcessing;
-import org.b3log.latke.http.annotation.RequestProcessor;
 import org.b3log.latke.http.renderer.AbstractFreeMarkerRenderer;
+import org.b3log.latke.ioc.BeanManager;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
+import org.b3log.latke.ioc.Singleton;
 import org.b3log.latke.model.Pagination;
 import org.b3log.latke.model.User;
 import org.b3log.latke.service.LangPropsService;
@@ -43,12 +42,12 @@ import org.b3log.latke.util.Stopwatchs;
 import org.b3log.latke.util.Strings;
 import org.b3log.symphony.cache.DomainCache;
 import org.b3log.symphony.model.*;
-import org.b3log.symphony.processor.advice.*;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchEndAdvice;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchStartAdvice;
-import org.b3log.symphony.processor.advice.validate.ArticleAddValidation;
-import org.b3log.symphony.processor.advice.validate.ArticleUpdateValidation;
-import org.b3log.symphony.processor.advice.validate.UserRegisterValidation;
+import org.b3log.symphony.processor.middleware.AnonymousViewCheckMidware;
+import org.b3log.symphony.processor.middleware.CSRFMidware;
+import org.b3log.symphony.processor.middleware.LoginCheckMidware;
+import org.b3log.symphony.processor.middleware.PermissionMidware;
+import org.b3log.symphony.processor.middleware.validate.ArticlePostValidationMidware;
+import org.b3log.symphony.processor.middleware.validate.UserRegisterValidationMidware;
 import org.b3log.symphony.service.*;
 import org.b3log.symphony.util.*;
 import org.json.JSONObject;
@@ -83,16 +82,16 @@ import java.util.*;
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
  * @author <a href="https://hacpai.com/member/ZephyrJung">Zephyr</a>
  * @author <a href="https://qiankunpingtai.cn">qiankunpingtai</a>
- * @version 1.27.3.5, Sep 6, 2019
+ * @version 2.0.1.0, May 11, 2020
  * @since 0.2.0
  */
-@RequestProcessor
+@Singleton
 public class ArticleProcessor {
 
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(ArticleProcessor.class);
+    private static final Logger LOGGER = LogManager.getLogger(ArticleProcessor.class);
 
     /**
      * Revision query service.
@@ -197,18 +196,43 @@ public class ArticleProcessor {
     private DataModelService dataModelService;
 
     /**
+     * Register request handlers.
+     */
+    public static void register() {
+        final BeanManager beanManager = BeanManager.getInstance();
+        final LoginCheckMidware loginCheck = beanManager.getReference(LoginCheckMidware.class);
+        final CSRFMidware csrfMidware = beanManager.getReference(CSRFMidware.class);
+        final PermissionMidware permissionMidware = beanManager.getReference(PermissionMidware.class);
+        final AnonymousViewCheckMidware anonymousViewCheckMidware = beanManager.getReference(AnonymousViewCheckMidware.class);
+        final ArticlePostValidationMidware articlePostValidationMidware = beanManager.getReference(ArticlePostValidationMidware.class);
+
+        final ArticleProcessor articleProcessor = beanManager.getReference(ArticleProcessor.class);
+        Dispatcher.post("/article/{id}/remove", articleProcessor::removeArticle, loginCheck::handle, permissionMidware::check);
+        Dispatcher.post("/article/check-title", articleProcessor::checkArticleTitle, loginCheck::handle);
+        Dispatcher.get("/article/{articleId}/image", articleProcessor::getArticleImage, loginCheck::handle);
+        Dispatcher.get("/article/{id}/revisions", articleProcessor::getArticleRevisions, loginCheck::handle, permissionMidware::check);
+        Dispatcher.get("/pre-post", articleProcessor::showPreAddArticle, loginCheck::handle, csrfMidware::fill);
+        Dispatcher.get("/post", articleProcessor::showAddArticle, loginCheck::handle, csrfMidware::fill);
+        Dispatcher.group().middlewares(anonymousViewCheckMidware::handle, csrfMidware::fill).router().get().uris(new String[]{"/article/{articleId}", "/article/{articleId}/comment/{commentId}"}).handler(articleProcessor::showArticle);
+        Dispatcher.post("/article", articleProcessor::addArticle, loginCheck::handle, csrfMidware::check, permissionMidware::check, articlePostValidationMidware::handle);
+        Dispatcher.get("/update", articleProcessor::showUpdateArticle, loginCheck::handle, csrfMidware::fill);
+        Dispatcher.put("/article/{id}", articleProcessor::updateArticle, loginCheck::handle, csrfMidware::check, permissionMidware::check, articlePostValidationMidware::handle);
+        Dispatcher.post("/markdown", articleProcessor::markdown2HTML);
+        Dispatcher.get("/article/{articleId}/preview", articleProcessor::getArticlePreviewContent);
+        Dispatcher.post("/article/reward", articleProcessor::rewardArticle, loginCheck::handle);
+        Dispatcher.post("/article/thank", articleProcessor::thankArticle, loginCheck::handle, permissionMidware::check);
+        Dispatcher.post("/article/stick", articleProcessor::stickArticle, loginCheck::handle, permissionMidware::check);
+    }
+
+    /**
      * Removes an article.
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/article/{id}/remove", method = HttpMethod.POST)
-    @Before({StopwatchStartAdvice.class, LoginCheck.class, PermissionCheck.class})
-    @After({StopwatchEndAdvice.class})
     public void removeArticle(final RequestContext context) {
         final String id = context.pathVar("id");
         if (StringUtils.isBlank(id)) {
             context.sendError(404);
-
             return;
         }
 
@@ -217,28 +241,24 @@ public class ArticleProcessor {
         final JSONObject article = articleQueryService.getArticle(id);
         if (null == article) {
             context.sendError(404);
-
             return;
         }
 
         final String authorId = article.optString(Article.ARTICLE_AUTHOR_ID);
         if (!authorId.equals(currentUserId)) {
             context.sendError(403);
-
             return;
         }
 
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
         try {
             articleMgmtService.removeArticle(id);
 
-            context.renderJSONValue(Keys.STATUS_CODE, StatusCodes.SUCC);
+            context.renderJSONValue(Keys.CODE, StatusCodes.SUCC);
             context.renderJSONValue(Article.ARTICLE_T_ID, id);
         } catch (final ServiceException e) {
             final String msg = e.getMessage();
-
             context.renderMsg(msg);
-            context.renderJSONValue(Keys.STATUS_CODE, StatusCodes.ERR);
         }
     }
 
@@ -247,12 +267,7 @@ public class ArticleProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/article/check-title", method = HttpMethod.POST)
-    @Before({StopwatchStartAdvice.class, LoginCheck.class})
-    @After({StopwatchEndAdvice.class})
     public void checkArticleTitle(final RequestContext context) {
-        final Request request = context.getRequest();
-
         final JSONObject currentUser = Sessions.getUser();
         final String currentUserId = currentUser.optString(Keys.OBJECT_ID);
         final JSONObject requestJSONObject = context.requestJSON();
@@ -262,8 +277,7 @@ public class ArticleProcessor {
 
         final JSONObject article = articleQueryService.getArticleByTitle(title);
         if (null == article) {
-            context.renderJSON(true);
-
+            context.renderJSON(StatusCodes.SUCC);
             return;
         }
 
@@ -286,15 +300,14 @@ public class ArticleProcessor {
             }
 
             final JSONObject ret = new JSONObject();
-            ret.put(Keys.STATUS_CODE, false);
+            ret.put(Keys.CODE, StatusCodes.ERR);
             ret.put(Keys.MSG, msg);
 
             context.renderJSON(ret);
         } else { // Update
             final JSONObject oldArticle = articleQueryService.getArticle(id);
             if (oldArticle.optString(Article.ARTICLE_TITLE).equals(title)) {
-                context.renderJSON(true);
-
+                context.renderJSON(StatusCodes.SUCC);
                 return;
             }
 
@@ -316,9 +329,8 @@ public class ArticleProcessor {
             }
 
             final JSONObject ret = new JSONObject();
-            ret.put(Keys.STATUS_CODE, false);
+            ret.put(Keys.CODE, StatusCodes.ERR);
             ret.put(Keys.MSG, msg);
-
             context.renderJSON(ret);
         }
     }
@@ -328,13 +340,9 @@ public class ArticleProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/article/{articleId}/image", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, LoginCheck.class})
-    @After({StopwatchEndAdvice.class})
     public void getArticleImage(final RequestContext context) {
         final String articleId = context.pathVar("articleId");
         final JSONObject article = articleQueryService.getArticle(articleId);
-        final String authorId = article.optString(Article.ARTICLE_AUTHOR_ID);
 
         final Set<JSONObject> characters = characterQueryService.getWrittenCharacters();
         final String articleContent = article.optString(Article.ARTICLE_CONTENT);
@@ -345,7 +353,6 @@ public class ArticleProcessor {
             final JSONObject chRecord = org.b3log.symphony.model.Character.getCharacter(ch, characters);
             if (null == chRecord) {
                 images.add(org.b3log.symphony.model.Character.createImage(ch));
-
                 continue;
             }
 
@@ -390,11 +397,9 @@ public class ArticleProcessor {
         }
 
         String url = "";
-
         final JSONObject ret = new JSONObject();
-        ret.put(Keys.STATUS_CODE, true);
+        ret.put(Keys.CODE, StatusCodes.SUCC);
         ret.put(Common.URL, url);
-
         context.renderJSON(ret);
     }
 
@@ -403,16 +408,12 @@ public class ArticleProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/article/{id}/revisions", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, LoginCheck.class, PermissionCheck.class})
-    @After({StopwatchEndAdvice.class})
     public void getArticleRevisions(final RequestContext context) {
         final String id = context.pathVar("id");
         final List<JSONObject> revisions = revisionQueryService.getArticleRevisions(id);
         final JSONObject ret = new JSONObject();
-        ret.put(Keys.STATUS_CODE, true);
+        ret.put(Keys.CODE, StatusCodes.SUCC);
         ret.put(Revision.REVISIONS, (Object) revisions);
-
         context.renderJSON(ret);
     }
 
@@ -421,9 +422,6 @@ public class ArticleProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/pre-post", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, LoginCheck.class})
-    @After({CSRFToken.class, PermissionGrant.class, StopwatchEndAdvice.class})
     public void showPreAddArticle(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "home/pre-post.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();
@@ -472,9 +470,6 @@ public class ArticleProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/post", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, LoginCheck.class})
-    @After({CSRFToken.class, PermissionGrant.class, StopwatchEndAdvice.class})
     public void showAddArticle(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "home/post.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();
@@ -500,7 +495,6 @@ public class ArticleProcessor {
 
                 if (Tag.containsWhiteListTags(tagTitle)) {
                     tagBuilder.append(tagTitle).append(",");
-
                     continue;
                 }
 
@@ -548,7 +542,9 @@ public class ArticleProcessor {
         String at = context.param(Common.AT);
         at = StringUtils.trim(at);
         if (StringUtils.isNotBlank(at)) {
-            dataModel.put(Common.AT, at + " ");
+            if (!UserRegisterValidationMidware.invalidUserName(at)) {
+                dataModel.put(Common.AT, at + " ");
+            }
         }
 
         dataModelService.fillHeaderAndFooter(context, dataModel);
@@ -561,7 +557,7 @@ public class ArticleProcessor {
 
         String articleContentErrorLabel = langPropsService.get("articleContentErrorLabel");
         articleContentErrorLabel = articleContentErrorLabel.replace("{maxArticleContentLength}",
-                String.valueOf(ArticleAddValidation.MAX_ARTICLE_CONTENT_LENGTH));
+                String.valueOf(ArticlePostValidationMidware.MAX_ARTICLE_CONTENT_LENGTH));
         dataModel.put("articleContentErrorLabel", articleContentErrorLabel);
 
         fillPostArticleRequisite(dataModel, currentUser);
@@ -581,9 +577,6 @@ public class ArticleProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/article/{articleId}", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({CSRFToken.class, PermissionGrant.class, StopwatchEndAdvice.class})
     public void showArticle(final RequestContext context) {
         final String articleId = context.pathVar("articleId");
         final Request request = context.getRequest();
@@ -594,7 +587,6 @@ public class ArticleProcessor {
         final JSONObject article = articleQueryService.getArticleById(articleId);
         if (null == article) {
             context.sendError(404);
-
             return;
         }
 
@@ -757,7 +749,6 @@ public class ArticleProcessor {
         if (!article.optBoolean(Common.DISCUSSION_VIEWABLE)) {
             article.put(Article.ARTICLE_T_COMMENTS, (Object) Collections.emptyList());
             article.put(Article.ARTICLE_T_NICE_COMMENTS, (Object) Collections.emptyList());
-
             return;
         }
 
@@ -832,7 +823,7 @@ public class ArticleProcessor {
 
         // Referral statistic
         final String referralUserName = context.param("r");
-        if (!UserRegisterValidation.invalidUserName(referralUserName)) {
+        if (!UserRegisterValidationMidware.invalidUserName(referralUserName)) {
             final JSONObject referralUser = userQueryService.getUserByName(referralUserName);
             if (null == referralUser) {
                 return;
@@ -877,11 +868,8 @@ public class ArticleProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/article", method = HttpMethod.POST)
-    @Before({StopwatchStartAdvice.class, LoginCheck.class, CSRFCheck.class, ArticleAddValidation.class, PermissionCheck.class})
-    @After(StopwatchEndAdvice.class)
     public void addArticle(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         final Request request = context.getRequest();
         final JSONObject requestJSONObject = context.requestJSON();
@@ -938,14 +926,13 @@ public class ArticleProcessor {
 
             final String articleId = articleMgmtService.addArticle(article);
 
-            context.renderJSONValue(Keys.STATUS_CODE, StatusCodes.SUCC);
+            context.renderJSONValue(Keys.CODE, StatusCodes.SUCC);
             context.renderJSONValue(Article.ARTICLE_T_ID, articleId);
         } catch (final ServiceException e) {
             final String msg = e.getMessage();
-            LOGGER.log(Level.ERROR, "Adds article [title=" + articleTitle + "] failed: {0}", e.getMessage());
-
+            LOGGER.log(Level.ERROR, "Adds article [title=" + articleTitle + "] failed: {}", e.getMessage());
             context.renderMsg(msg);
-            context.renderJSONValue(Keys.STATUS_CODE, StatusCodes.ERR);
+            context.renderJSONValue(Keys.CODE, StatusCodes.ERR);
         }
     }
 
@@ -954,21 +941,16 @@ public class ArticleProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/update", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, LoginCheck.class})
-    @After({CSRFToken.class, PermissionGrant.class, StopwatchEndAdvice.class})
     public void showUpdateArticle(final RequestContext context) {
         final String articleId = context.param("id");
         if (StringUtils.isBlank(articleId)) {
             context.sendError(404);
-
             return;
         }
 
         final JSONObject article = articleQueryService.getArticle(articleId);
         if (null == article) {
             context.sendError(404);
-
             return;
         }
 
@@ -976,7 +958,6 @@ public class ArticleProcessor {
         if (null == currentUser
                 || !currentUser.optString(Keys.OBJECT_ID).equals(article.optString(Article.ARTICLE_AUTHOR_ID))) {
             context.sendError(403);
-
             return;
         }
 
@@ -1023,31 +1004,25 @@ public class ArticleProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/article/{id}", method = HttpMethod.PUT)
-    @Before({StopwatchStartAdvice.class, LoginCheck.class, CSRFCheck.class, ArticleUpdateValidation.class, PermissionCheck.class})
-    @After(StopwatchEndAdvice.class)
     public void updateArticle(final RequestContext context) {
         final String id = context.pathVar("id");
         final Request request = context.getRequest();
         if (StringUtils.isBlank(id)) {
             context.sendError(404);
-
             return;
         }
 
         final JSONObject oldArticle = articleQueryService.getArticleById(id);
         if (null == oldArticle) {
             context.sendError(404);
-
             return;
         }
 
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         if (Article.ARTICLE_STATUS_C_VALID != oldArticle.optInt(Article.ARTICLE_STATUS)) {
             context.renderMsg(langPropsService.get("articleLockedLabel"));
-            context.renderJSONValue(Keys.STATUS_CODE, StatusCodes.ERR);
-
+            context.renderJSONValue(Keys.CODE, StatusCodes.ERR);
             return;
         }
 
@@ -1085,7 +1060,6 @@ public class ArticleProcessor {
         if (null == currentUser
                 || !currentUser.optString(Keys.OBJECT_ID).equals(oldArticle.optString(Article.ARTICLE_AUTHOR_ID))) {
             context.sendError(403);
-
             return;
         }
 
@@ -1108,14 +1082,13 @@ public class ArticleProcessor {
         try {
             articleMgmtService.updateArticle(article);
 
-            context.renderJSONValue(Keys.STATUS_CODE, StatusCodes.SUCC);
+            context.renderJSONValue(Keys.CODE, StatusCodes.SUCC);
             context.renderJSONValue(Article.ARTICLE_T_ID, id);
         } catch (final ServiceException e) {
             final String msg = e.getMessage();
-            LOGGER.log(Level.ERROR, "Adds article [title=" + articleTitle + "] failed: {0}", e.getMessage());
-
+            LOGGER.log(Level.ERROR, "Adds article [title=" + articleTitle + "] failed: {}", e.getMessage());
             context.renderMsg(msg);
-            context.renderJSONValue(Keys.STATUS_CODE, StatusCodes.ERR);
+            context.renderJSONValue(Keys.CODE, StatusCodes.ERR);
         }
     }
 
@@ -1132,9 +1105,6 @@ public class ArticleProcessor {
      *
      * @param context the specified http request context
      */
-    @RequestProcessing(value = "/markdown", method = HttpMethod.POST)
-    @Before(StopwatchStartAdvice.class)
-    @After(StopwatchEndAdvice.class)
     public void markdown2HTML(final RequestContext context) {
         final JSONObject result = Results.newSucc();
         context.renderJSON(result);
@@ -1143,7 +1113,6 @@ public class ArticleProcessor {
         final String markdownText = requestJSON.optString("markdownText");
         if (StringUtils.isBlank(markdownText)) {
             context.renderJSONValue("html", "");
-
             return;
         }
 
@@ -1152,8 +1121,8 @@ public class ArticleProcessor {
         html = Emotions.convert(html);
         html = Markdowns.toHTML(html);
         html = Markdowns.clean(html, "");
-        html = MP3Players.render(html);
-        html = VideoPlayers.render(html);
+        html = MediaPlayers.renderAudio(html);
+        html = MediaPlayers.renderVideo(html);
 
         result.put(Common.DATA, html);
     }
@@ -1171,20 +1140,15 @@ public class ArticleProcessor {
      *
      * @param context the specified http request context
      */
-    @RequestProcessing(value = "/article/{articleId}/preview", method = HttpMethod.GET)
-    @Before(StopwatchStartAdvice.class)
-    @After(StopwatchEndAdvice.class)
     public void getArticlePreviewContent(final RequestContext context) {
         final String articleId = context.pathVar("articleId");
-        final Request request = context.getRequest();
         final String content = articleQueryService.getArticlePreviewContent(articleId, context);
         if (StringUtils.isBlank(content)) {
-            context.renderJSON().renderFalseResult();
-
+            context.renderJSON(StatusCodes.ERR);
             return;
         }
 
-        context.renderJSON(true).renderJSONValue("html", content);
+        context.renderJSON(StatusCodes.SUCC).renderJSONValue("html", content);
     }
 
     /**
@@ -1192,33 +1156,25 @@ public class ArticleProcessor {
      *
      * @param context the specified http request context
      */
-    @RequestProcessing(value = "/article/reward", method = HttpMethod.POST)
-    @Before(StopwatchStartAdvice.class)
-    @After(StopwatchEndAdvice.class)
-    public void reward(final RequestContext context) {
-        final Request request = context.getRequest();
-
+    public void rewardArticle(final RequestContext context) {
         final JSONObject currentUser = Sessions.getUser();
         if (null == currentUser) {
             context.sendError(403);
-
             return;
         }
 
         final String articleId = context.param(Article.ARTICLE_T_ID);
         if (StringUtils.isBlank(articleId)) {
             context.sendError(400);
-
             return;
         }
 
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         try {
             articleMgmtService.reward(articleId, currentUser.optString(Keys.OBJECT_ID));
         } catch (final ServiceException e) {
             context.renderMsg(langPropsService.get("transferFailLabel"));
-
             return;
         }
 
@@ -1226,7 +1182,7 @@ public class ArticleProcessor {
         articleQueryService.processArticleContent(article);
 
         final String rewardContent = article.optString(Article.ARTICLE_REWARD_CONTENT);
-        context.renderTrueResult().renderJSONValue(Article.ARTICLE_REWARD_CONTENT, rewardContent);
+        context.renderJSON(StatusCodes.SUCC).renderJSONValue(Article.ARTICLE_REWARD_CONTENT, rewardContent);
     }
 
     /**
@@ -1234,37 +1190,29 @@ public class ArticleProcessor {
      *
      * @param context the specified http request context
      */
-    @RequestProcessing(value = "/article/thank", method = HttpMethod.POST)
-    @Before({StopwatchStartAdvice.class, PermissionCheck.class})
-    @After(StopwatchEndAdvice.class)
-    public void thank(final RequestContext context) {
-        final Request request = context.getRequest();
-
+    public void thankArticle(final RequestContext context) {
         final JSONObject currentUser = Sessions.getUser();
         if (null == currentUser) {
             context.sendError(403);
-
             return;
         }
 
         final String articleId = context.param(Article.ARTICLE_T_ID);
         if (StringUtils.isBlank(articleId)) {
             context.sendError(400);
-
             return;
         }
 
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         try {
             articleMgmtService.thank(articleId, currentUser.optString(Keys.OBJECT_ID));
         } catch (final ServiceException e) {
             context.renderMsg(langPropsService.get("transferFailLabel"));
-
             return;
         }
 
-        context.renderTrueResult();
+        context.renderJSON(StatusCodes.SUCC);
     }
 
     /**
@@ -1272,49 +1220,39 @@ public class ArticleProcessor {
      *
      * @param context the specified HTTP request context
      */
-    @RequestProcessing(value = "/article/stick", method = HttpMethod.POST)
-    @Before({StopwatchStartAdvice.class, PermissionCheck.class})
-    @After(StopwatchEndAdvice.class)
     public void stickArticle(final RequestContext context) {
-        final Request request = context.getRequest();
-
         final JSONObject currentUser = Sessions.getUser();
         if (null == currentUser) {
             context.sendError(403);
-
             return;
         }
 
         final String articleId = context.param(Article.ARTICLE_T_ID);
         if (StringUtils.isBlank(articleId)) {
             context.sendError(400);
-
             return;
         }
 
         final JSONObject article = articleQueryService.getArticle(articleId);
         if (null == article) {
             context.sendError(404);
-
             return;
         }
 
         if (!currentUser.optString(Keys.OBJECT_ID).equals(article.optString(Article.ARTICLE_AUTHOR_ID))) {
             context.sendError(403);
-
             return;
         }
 
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         try {
             articleMgmtService.stick(articleId);
         } catch (final ServiceException e) {
             context.renderMsg(e.getMessage());
-
             return;
         }
 
-        context.renderTrueResult().renderMsg(langPropsService.get("stickSuccLabel"));
+        context.renderJSON(StatusCodes.SUCC).renderMsg(langPropsService.get("stickSuccLabel"));
     }
 }

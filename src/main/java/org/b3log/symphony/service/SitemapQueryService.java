@@ -18,11 +18,12 @@
 package org.b3log.symphony.service;
 
 import org.apache.commons.lang.time.DateFormatUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.Latkes;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.repository.FilterOperator;
 import org.b3log.latke.repository.PropertyFilter;
 import org.b3log.latke.repository.Query;
@@ -33,7 +34,6 @@ import org.b3log.symphony.model.Article;
 import org.b3log.symphony.model.Domain;
 import org.b3log.symphony.model.sitemap.Sitemap;
 import org.b3log.symphony.repository.ArticleRepository;
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.Date;
@@ -52,7 +52,7 @@ public class SitemapQueryService {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(SitemapQueryService.class);
+    private static final Logger LOGGER = LogManager.getLogger(SitemapQueryService.class);
 
     /**
      * Article repository.
@@ -110,21 +110,16 @@ public class SitemapQueryService {
                 select(Keys.OBJECT_ID, Article.ARTICLE_UPDATE_TIME).
                 setFilter(new PropertyFilter(Article.ARTICLE_STATUS, FilterOperator.NOT_EQUAL, Article.ARTICLE_STATUS_C_INVALID)).
                 addSort(Keys.OBJECT_ID, SortDirection.DESCENDING);
-
         try {
-            final JSONArray articles = articleRepository.get(query).getJSONArray(Keys.RESULTS);
-
-            for (int i = 0; i < articles.length(); i++) {
-                final JSONObject article = articles.getJSONObject(i);
+            final List<JSONObject> articles = articleRepository.getList(query);
+            for (final JSONObject article : articles) {
                 final long id = article.getLong(Keys.OBJECT_ID);
                 final String permalink = Latkes.getServePath() + "/article/" + id;
-
                 final Sitemap.URL url = new Sitemap.URL();
                 url.setLoc(permalink);
                 final Date updateDate = new Date(id);
                 final String lastMod = DateFormatUtils.ISO_DATETIME_TIME_ZONE_FORMAT.format(updateDate);
                 url.setLastMod(lastMod);
-
                 sitemap.addURL(url);
             }
         } catch (final Exception e) {

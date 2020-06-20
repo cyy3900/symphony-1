@@ -17,15 +17,15 @@
  */
 package org.b3log.symphony.service;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.repository.*;
 import org.b3log.latke.repository.annotation.Transactional;
 import org.b3log.latke.service.ServiceException;
 import org.b3log.latke.service.annotation.Service;
-import org.b3log.latke.util.CollectionUtils;
 import org.b3log.symphony.model.Common;
 import org.b3log.symphony.model.Notification;
 import org.b3log.symphony.model.UserExt;
@@ -37,7 +37,6 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Notification management service.
@@ -52,7 +51,7 @@ public class NotificationMgmtService {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(NotificationMgmtService.class);
+    private static final Logger LOGGER = LogManager.getLogger(NotificationMgmtService.class);
 
     /**
      * Notification repository.
@@ -463,11 +462,8 @@ public class NotificationMgmtService {
                         new PropertyFilter(Notification.NOTIFICATION_USER_ID, FilterOperator.EQUAL, userId),
                         new PropertyFilter(Notification.NOTIFICATION_HAS_READ, FilterOperator.EQUAL, false),
                         new PropertyFilter(Notification.NOTIFICATION_DATA_TYPE, FilterOperator.EQUAL, type)));
-
         try {
-            final Set<JSONObject> notifications = CollectionUtils.jsonArrayToSet(notificationRepository.get(query).
-                    optJSONArray(Keys.RESULTS));
-
+            final List<JSONObject> notifications = notificationRepository.getList(query);
             makeRead(notifications);
         } catch (final Exception e) {
             LOGGER.log(Level.ERROR, "Makes read failed", e);
@@ -484,11 +480,8 @@ public class NotificationMgmtService {
                 CompositeFilterOperator.and(
                         new PropertyFilter(Notification.NOTIFICATION_USER_ID, FilterOperator.EQUAL, userId),
                         new PropertyFilter(Notification.NOTIFICATION_HAS_READ, FilterOperator.EQUAL, false)));
-
         try {
-            final Set<JSONObject> notifications = CollectionUtils.jsonArrayToSet(notificationRepository.get(query).
-                    optJSONArray(Keys.RESULTS));
-
+            final List<JSONObject> notifications = notificationRepository.getList(query);
             makeRead(notifications);
         } catch (final Exception e) {
             LOGGER.log(Level.ERROR, "Makes read failed", e);
@@ -521,11 +514,8 @@ public class NotificationMgmtService {
                         new PropertyFilter(Notification.NOTIFICATION_USER_ID, FilterOperator.EQUAL, userId),
                         new PropertyFilter(Notification.NOTIFICATION_HAS_READ, FilterOperator.EQUAL, false),
                         new PropertyFilter(Notification.NOTIFICATION_DATA_ID, FilterOperator.IN, commentIds)));
-
         try {
-            final Set<JSONObject> notifications = CollectionUtils.jsonArrayToSet(notificationRepository.get(query).
-                    optJSONArray(Keys.RESULTS));
-
+            final List<JSONObject> notifications = notificationRepository.getList(query);
             makeRead(notifications);
         } catch (final Exception e) {
             LOGGER.log(Level.ERROR, "Makes read failed", e);

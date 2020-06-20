@@ -17,19 +17,14 @@
  */
 package org.b3log.symphony.processor;
 
-import org.b3log.latke.http.HttpMethod;
+import org.b3log.latke.http.Dispatcher;
 import org.b3log.latke.http.RequestContext;
-import org.b3log.latke.http.annotation.After;
-import org.b3log.latke.http.annotation.Before;
-import org.b3log.latke.http.annotation.RequestProcessing;
-import org.b3log.latke.http.annotation.RequestProcessor;
 import org.b3log.latke.http.renderer.AbstractFreeMarkerRenderer;
+import org.b3log.latke.ioc.BeanManager;
 import org.b3log.latke.ioc.Inject;
+import org.b3log.latke.ioc.Singleton;
 import org.b3log.symphony.model.Common;
-import org.b3log.symphony.processor.advice.AnonymousViewCheck;
-import org.b3log.symphony.processor.advice.PermissionGrant;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchEndAdvice;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchStartAdvice;
+import org.b3log.symphony.processor.middleware.AnonymousViewCheckMidware;
 import org.b3log.symphony.service.*;
 import org.b3log.symphony.util.Symphonys;
 import org.json.JSONObject;
@@ -48,10 +43,10 @@ import java.util.Map;
  * </ul>
  *
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
- * @version 1.4.0.1, Jan 5, 2019
+ * @version 2.0.0.0, Feb 11, 2020
  * @since 1.3.0
  */
-@RequestProcessor
+@Singleton
 public class TopProcessor {
 
     /**
@@ -85,13 +80,25 @@ public class TopProcessor {
     private LinkQueryService linkQueryService;
 
     /**
+     * Register request handlers.
+     */
+    public static void register() {
+        final BeanManager beanManager = BeanManager.getInstance();
+        final AnonymousViewCheckMidware anonymousViewCheckMidware = beanManager.getReference(AnonymousViewCheckMidware.class);
+
+        final TopProcessor topProcessor = beanManager.getReference(TopProcessor.class);
+        Dispatcher.get("/top", topProcessor::showTop, anonymousViewCheckMidware::handle);
+        Dispatcher.get("/top/link", topProcessor::showLink, anonymousViewCheckMidware::handle);
+        Dispatcher.get("/top/balance", topProcessor::showBalance, anonymousViewCheckMidware::handle);
+        Dispatcher.get("/top/consumption", topProcessor::showConsumption, anonymousViewCheckMidware::handle);
+        Dispatcher.get("/top/checkin", topProcessor::showCheckin, anonymousViewCheckMidware::handle);
+    }
+
+    /**
      * Shows top.
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/top", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showTop(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "top/index.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();
@@ -109,9 +116,6 @@ public class TopProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/top/link", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showLink(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "top/link.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();
@@ -130,9 +134,6 @@ public class TopProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/top/balance", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showBalance(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "top/balance.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();
@@ -151,9 +152,6 @@ public class TopProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/top/consumption", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showConsumption(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "top/consumption.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();
@@ -172,9 +170,6 @@ public class TopProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/top/checkin", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showCheckin(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "top/checkin.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();

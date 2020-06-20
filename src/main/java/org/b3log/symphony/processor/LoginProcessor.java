@@ -20,36 +20,34 @@ package org.b3log.symphony.processor;
 import org.apache.commons.lang.RandomStringUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.time.DateUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.Latkes;
-import org.b3log.latke.http.HttpMethod;
+import org.b3log.latke.http.Dispatcher;
 import org.b3log.latke.http.Request;
 import org.b3log.latke.http.RequestContext;
 import org.b3log.latke.http.Response;
-import org.b3log.latke.http.annotation.After;
-import org.b3log.latke.http.annotation.Before;
-import org.b3log.latke.http.annotation.RequestProcessing;
-import org.b3log.latke.http.annotation.RequestProcessor;
 import org.b3log.latke.http.renderer.AbstractFreeMarkerRenderer;
+import org.b3log.latke.ioc.BeanManager;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
+import org.b3log.latke.ioc.Singleton;
 import org.b3log.latke.model.User;
 import org.b3log.latke.service.LangPropsService;
 import org.b3log.latke.service.ServiceException;
 import org.b3log.latke.util.Locales;
 import org.b3log.latke.util.Requests;
+import org.b3log.latke.util.URLs;
 import org.b3log.symphony.model.*;
-import org.b3log.symphony.processor.advice.CSRFToken;
-import org.b3log.symphony.processor.advice.LoginCheck;
-import org.b3log.symphony.processor.advice.PermissionGrant;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchEndAdvice;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchStartAdvice;
-import org.b3log.symphony.processor.advice.validate.UserForgetPwdValidation;
-import org.b3log.symphony.processor.advice.validate.UserRegister2Validation;
-import org.b3log.symphony.processor.advice.validate.UserRegisterValidation;
+import org.b3log.symphony.processor.middleware.CSRFMidware;
+import org.b3log.symphony.processor.middleware.LoginCheckMidware;
+import org.b3log.symphony.processor.middleware.validate.UserForgetPwdValidationMidware;
+import org.b3log.symphony.processor.middleware.validate.UserRegister2ValidationMidware;
+import org.b3log.symphony.processor.middleware.validate.UserRegisterValidationMidware;
 import org.b3log.symphony.service.*;
 import org.b3log.symphony.util.Sessions;
+import org.b3log.symphony.util.StatusCodes;
 import org.json.JSONObject;
 
 import java.util.*;
@@ -66,10 +64,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
  * @author <a href="http://vanessa.b3log.org">Liyuan Li</a>
- * @version 1.13.12.8, Sep 6, 2019
+ * @version 2.0.0.1, May 31, 2020
  * @since 0.2.0
  */
-@RequestProcessor
+@Singleton
 public class LoginProcessor {
 
     /**
@@ -83,7 +81,7 @@ public class LoginProcessor {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(LoginProcessor.class);
+    private static final Logger LOGGER = LogManager.getLogger(LoginProcessor.class);
 
     /**
      * User management service.
@@ -164,21 +162,44 @@ public class LoginProcessor {
     private TagQueryService tagQueryService;
 
     /**
+     * Register request handlers.
+     */
+    public static void register() {
+        final BeanManager beanManager = BeanManager.getInstance();
+        final LoginCheckMidware loginCheck = beanManager.getReference(LoginCheckMidware.class);
+        final CSRFMidware csrfMidware = beanManager.getReference(CSRFMidware.class);
+        final UserForgetPwdValidationMidware userForgetPwdValidationMidware = beanManager.getReference(UserForgetPwdValidationMidware.class);
+        final UserRegisterValidationMidware userRegisterValidationMidware = beanManager.getReference(UserRegisterValidationMidware.class);
+        final UserRegister2ValidationMidware userRegister2ValidationMidware = beanManager.getReference(UserRegister2ValidationMidware.class);
+
+        final LoginProcessor loginProcessor = beanManager.getReference(LoginProcessor.class);
+        Dispatcher.post("/guide/next", loginProcessor::nextGuideStep, loginCheck::handle);
+        Dispatcher.get("/guide", loginProcessor::showGuide, loginCheck::handle, csrfMidware::fill);
+        Dispatcher.get("/login", loginProcessor::showLogin);
+        Dispatcher.get("/forget-pwd", loginProcessor::showForgetPwd);
+        Dispatcher.post("/forget-pwd", loginProcessor::forgetPwd, userForgetPwdValidationMidware::handle);
+        Dispatcher.get("/reset-pwd", loginProcessor::showResetPwd);
+        Dispatcher.post("/reset-pwd", loginProcessor::resetPwd);
+        Dispatcher.get("/register", loginProcessor::showRegister);
+        Dispatcher.post("/register", loginProcessor::register, userRegisterValidationMidware::handle);
+        Dispatcher.post("/register2", loginProcessor::register2, userRegister2ValidationMidware::handle);
+        Dispatcher.post("/login", loginProcessor::login);
+        Dispatcher.get("/logout", loginProcessor::logout);
+    }
+
+    /**
      * Next guide step.
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/guide/next", method = HttpMethod.POST)
-    @Before({LoginCheck.class})
     public void nextGuideStep(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         JSONObject requestJSONObject;
         try {
             requestJSONObject = context.requestJSON();
         } catch (final Exception e) {
             LOGGER.warn(e.getMessage());
-
             return;
         }
 
@@ -197,11 +218,10 @@ public class LoginProcessor {
             userMgmtService.updateUser(userId, user);
         } catch (final Exception e) {
             LOGGER.log(Level.ERROR, "Guide next step [" + step + "] failed", e);
-
             return;
         }
 
-        context.renderJSON(true);
+        context.renderJSON(StatusCodes.SUCC);
     }
 
     /**
@@ -209,15 +229,11 @@ public class LoginProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/guide", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, LoginCheck.class})
-    @After({CSRFToken.class, PermissionGrant.class, StopwatchEndAdvice.class})
     public void showGuide(final RequestContext context) {
         final JSONObject currentUser = Sessions.getUser();
         final int step = currentUser.optInt(UserExt.USER_GUIDE_STEP);
         if (UserExt.USER_GUIDE_STEP_FIN == step) {
             context.sendRedirect(Latkes.getServePath());
-
             return;
         }
 
@@ -234,7 +250,6 @@ public class LoginProcessor {
             final JSONObject user = iterator.next();
             if (user.optString(Keys.OBJECT_ID).equals(currentUser.optString(Keys.OBJECT_ID))) {
                 iterator.remove();
-
                 break;
             }
         }
@@ -248,13 +263,9 @@ public class LoginProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/login", method = HttpMethod.GET)
-    @Before(StopwatchStartAdvice.class)
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showLogin(final RequestContext context) {
         if (Sessions.isLoggedIn()) {
             context.sendRedirect(Latkes.getServePath());
-
             return;
         }
 
@@ -269,7 +280,7 @@ public class LoginProcessor {
 
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "verify/login.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();
-        dataModel.put(Common.GOTO, referer);
+        dataModel.put(Common.GOTO, URLs.encode(referer));
 
         dataModelService.fillHeaderAndFooter(context, dataModel);
     }
@@ -279,9 +290,6 @@ public class LoginProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/forget-pwd", method = HttpMethod.GET)
-    @Before(StopwatchStartAdvice.class)
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showForgetPwd(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "verify/forget-pwd.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();
@@ -293,10 +301,8 @@ public class LoginProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/forget-pwd", method = HttpMethod.POST)
-    @Before(UserForgetPwdValidation.class)
     public void forgetPwd(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         final JSONObject requestJSONObject = (JSONObject) context.attr(Keys.REQUEST);
         final String email = requestJSONObject.optString(User.USER_EMAIL);
@@ -304,8 +310,7 @@ public class LoginProcessor {
         try {
             final JSONObject user = userQueryService.getUserByEmail(email);
             if (null == user || UserExt.USER_STATUS_C_VALID != user.optInt(UserExt.USER_STATUS)) {
-                context.renderFalseResult().renderMsg(langPropsService.get("notFoundUserLabel"));
-
+                context.renderMsg(langPropsService.get("notFoundUserLabel"));
                 return;
             }
 
@@ -322,11 +327,10 @@ public class LoginProcessor {
             verifycode.put(Verifycode.USER_ID, userId);
             verifycodeMgmtService.addVerifycode(verifycode);
 
-            context.renderTrueResult().renderMsg(langPropsService.get("verifycodeSentLabel"));
+            context.renderJSON(StatusCodes.SUCC).renderMsg(langPropsService.get("verifycodeSentLabel"));
         } catch (final ServiceException e) {
             final String msg = langPropsService.get("resetPwdLabel") + " - " + e.getMessage();
             LOGGER.log(Level.ERROR, msg + "[email=" + email + "]");
-
             context.renderMsg(msg);
         }
     }
@@ -336,9 +340,6 @@ public class LoginProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/reset-pwd", method = HttpMethod.GET)
-    @Before(StopwatchStartAdvice.class)
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showResetPwd(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, null);
         context.setRenderer(renderer);
@@ -366,9 +367,8 @@ public class LoginProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/reset-pwd", method = HttpMethod.POST)
     public void resetPwd(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         final Response response = context.getResponse();
         final JSONObject requestJSONObject = context.requestJSON();
@@ -378,7 +378,6 @@ public class LoginProcessor {
         final JSONObject verifycode = verifycodeQueryService.getVerifycode(code);
         if (null == verifycode || !verifycode.optString(Verifycode.USER_ID).equals(userId)) {
             context.renderMsg(langPropsService.get("verifycodeExpiredLabel"));
-
             return;
         }
 
@@ -388,21 +387,18 @@ public class LoginProcessor {
             final JSONObject user = userQueryService.getUser(userId);
             if (null == user || UserExt.USER_STATUS_C_VALID != user.optInt(UserExt.USER_STATUS)) {
                 context.renderMsg(langPropsService.get("resetPwdLabel") + " - " + "User Not Found");
-
                 return;
             }
 
             user.put(User.USER_PASSWORD, password);
             userMgmtService.updatePassword(user);
             verifycodeMgmtService.removeByCode(code);
-            context.renderTrueResult();
+            context.renderJSON(StatusCodes.SUCC);
             LOGGER.info("User [email=" + user.optString(User.USER_EMAIL) + "] reseted password");
-
             Sessions.login(response, userId, true);
         } catch (final ServiceException e) {
             final String msg = langPropsService.get("resetPwdLabel") + " - " + e.getMessage();
-            LOGGER.log(Level.ERROR, msg + "[name={0}, email={1}]", name, email);
-
+            LOGGER.log(Level.ERROR, msg + "[name={}, email={}]", name, email);
             context.renderMsg(msg);
         }
     }
@@ -412,13 +408,9 @@ public class LoginProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/register", method = HttpMethod.GET)
-    @Before(StopwatchStartAdvice.class)
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showRegister(final RequestContext context) {
         if (Sessions.isLoggedIn()) {
             context.sendRedirect(Latkes.getServePath());
-
             return;
         }
 
@@ -429,7 +421,7 @@ public class LoginProcessor {
         boolean useInvitationLink = false;
 
         String referral = context.param("r");
-        if (!UserRegisterValidation.invalidUserName(referral)) {
+        if (!UserRegisterValidationMidware.invalidUserName(referral)) {
             final JSONObject referralUser = userQueryService.getUserByName(referral);
             if (null != referralUser) {
                 dataModel.put(Common.REFERRAL, referral);
@@ -484,11 +476,9 @@ public class LoginProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/register", method = HttpMethod.POST)
-    @Before(UserRegisterValidation.class)
     public void register(final RequestContext context) {
-        context.renderJSON();
-        final JSONObject requestJSONObject = (JSONObject) context.attr(Keys.REQUEST);
+        context.renderJSON(StatusCodes.ERR);
+        final JSONObject requestJSONObject = context.getRequest().getJSON();
         final String name = requestJSONObject.optString(User.USER_NAME);
         final String email = requestJSONObject.optString(User.USER_EMAIL);
         final String invitecode = requestJSONObject.optString(Invitecode.INVITECODE);
@@ -528,11 +518,10 @@ public class LoginProcessor {
                 invitecodeMgmtService.updateInvitecode(icId, ic);
             }
 
-            context.renderTrueResult().renderMsg(langPropsService.get("verifycodeSentLabel"));
+            context.renderJSON(StatusCodes.SUCC).renderMsg(langPropsService.get("verifycodeSentLabel"));
         } catch (final ServiceException e) {
             final String msg = langPropsService.get("registerFailLabel") + " - " + e.getMessage();
-            LOGGER.log(Level.ERROR, msg + "[name={0}, email={1}]", name, email);
-
+            LOGGER.log(Level.ERROR, msg + "[name={}, email={}]", name, email);
             context.renderMsg(msg);
         }
     }
@@ -542,14 +531,12 @@ public class LoginProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/register2", method = HttpMethod.POST)
-    @Before(UserRegister2Validation.class)
     public void register2(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         final Request request = context.getRequest();
         final Response response = context.getResponse();
-        final JSONObject requestJSONObject = (JSONObject) context.attr(Keys.REQUEST);
+        final JSONObject requestJSONObject = context.getRequest().getJSON();
 
         final String password = requestJSONObject.optString(User.USER_PASSWORD); // Hashed
         final int appRole = requestJSONObject.optInt(UserExt.USER_APP_ROLE);
@@ -562,7 +549,6 @@ public class LoginProcessor {
             final JSONObject user = userQueryService.getUser(userId);
             if (null == user) {
                 context.renderMsg(langPropsService.get("registerFailLabel") + " - " + "User Not Found");
-
                 return;
             }
 
@@ -580,7 +566,7 @@ public class LoginProcessor {
             final String ip = Requests.getRemoteAddr(request);
             userMgmtService.updateOnlineStatus(user.optString(Keys.OBJECT_ID), ip, true, true);
 
-            if (StringUtils.isNotBlank(referral) && !UserRegisterValidation.invalidUserName(referral)) {
+            if (StringUtils.isNotBlank(referral) && !UserRegisterValidationMidware.invalidUserName(referral)) {
                 final JSONObject referralUser = userQueryService.getUserByName(referral);
                 if (null != referralUser) {
                     final String referralId = referralUser.optString(Keys.OBJECT_ID);
@@ -621,13 +607,12 @@ public class LoginProcessor {
                 }
             }
 
-            context.renderTrueResult();
+            context.renderJSON(StatusCodes.SUCC);
 
-            LOGGER.log(Level.INFO, "Registered a user [name={0}, email={1}]", name, email);
+            LOGGER.log(Level.INFO, "Registered a user [name={}, email={}]", name, email);
         } catch (final ServiceException e) {
             final String msg = langPropsService.get("registerFailLabel") + " - " + e.getMessage();
-            LOGGER.log(Level.ERROR, msg + " [name={0}, email={1}]", name, email);
-
+            LOGGER.log(Level.ERROR, msg + " [name={}, email={}]", name, email);
             context.renderMsg(msg);
         }
     }
@@ -637,22 +622,11 @@ public class LoginProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/login", method = HttpMethod.POST)
     public void login(final RequestContext context) {
         final Request request = context.getRequest();
         final Response response = context.getResponse();
-
-        context.renderJSON().renderMsg(langPropsService.get("loginFailLabel"));
-
-        JSONObject requestJSONObject;
-        try {
-            requestJSONObject = context.requestJSON();
-        } catch (final Exception e) {
-            context.renderMsg(langPropsService.get("paramsParseFailedLabel"));
-
-            return;
-        }
-
+        context.renderJSON(StatusCodes.ERR).renderMsg(langPropsService.get("loginFailLabel"));
+        final JSONObject requestJSONObject = context.requestJSON();
         final String nameOrEmail = requestJSONObject.optString("nameOrEmail");
 
         try {
@@ -663,21 +637,18 @@ public class LoginProcessor {
 
             if (null == user) {
                 context.renderMsg(langPropsService.get("notFoundUserLabel"));
-
                 return;
             }
 
             if (UserExt.USER_STATUS_C_INVALID == user.optInt(UserExt.USER_STATUS)) {
                 userMgmtService.updateOnlineStatus(user.optString(Keys.OBJECT_ID), "", false, true);
                 context.renderMsg(langPropsService.get("userBlockLabel"));
-
                 return;
             }
 
             if (UserExt.USER_STATUS_C_NOT_VERIFIED == user.optInt(UserExt.USER_STATUS)) {
                 userMgmtService.updateOnlineStatus(user.optString(Keys.OBJECT_ID), "", false, true);
                 context.renderMsg(langPropsService.get("notVerifiedLabel"));
-
                 return;
             }
 
@@ -685,7 +656,6 @@ public class LoginProcessor {
                     || UserExt.USER_STATUS_C_DEACTIVATED == user.optInt(UserExt.USER_STATUS)) {
                 userMgmtService.updateOnlineStatus(user.optString(Keys.OBJECT_ID), "", false, true);
                 context.renderMsg(langPropsService.get("invalidLoginLabel"));
-
                 return;
             }
 
@@ -701,7 +671,6 @@ public class LoginProcessor {
                 if (!StringUtils.equals(wrong.optString(CaptchaProcessor.CAPTCHA), captcha)) {
                     context.renderMsg(langPropsService.get("captchaErrorLabel"));
                     context.renderJSONValue(Common.NEED_CAPTCHA, userId);
-
                     return;
                 }
             }
@@ -713,11 +682,10 @@ public class LoginProcessor {
                 final String ip = Requests.getRemoteAddr(request);
                 userMgmtService.updateOnlineStatus(user.optString(Keys.OBJECT_ID), ip, true, true);
 
-                context.renderMsg("").renderTrueResult();
+                context.renderCodeMsg(StatusCodes.SUCC, "");
                 context.renderJSONValue(Keys.TOKEN, token);
 
                 WRONG_PWD_TRIES.remove(userId);
-
                 return;
             }
 
@@ -739,10 +707,7 @@ public class LoginProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/logout", method = HttpMethod.GET)
     public void logout(final RequestContext context) {
-        final Request request = context.getRequest();
-
         final JSONObject user = Sessions.getUser();
         if (null != user) {
             Sessions.logout(user.optString(Keys.OBJECT_ID), context.getResponse());
@@ -751,6 +716,10 @@ public class LoginProcessor {
         String destinationURL = context.param(Common.GOTO);
         if (StringUtils.isBlank(destinationURL)) {
             destinationURL = context.header("referer");
+        }
+
+        if (!StringUtils.startsWith(destinationURL, Latkes.getServePath())) {
+            destinationURL = Latkes.getServePath();
         }
 
         context.sendRedirect(destinationURL);

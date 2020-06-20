@@ -21,7 +21,7 @@
  * @author <a href="http://vanessa.b3log.org">Liyuan Li</a>
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
  * @author <a href="https://hacpai.com/member/ZephyrJung">Zephyr</a>
- * @version 1.47.1.0, Nov 19, 2019
+ * @version 1.49.0.1, Apr 30, 2020
  */
 
 /**
@@ -113,14 +113,11 @@ var Util = {
   parseMarkdown: function () {
     Vditor.mermaidRender(document.body)
     Vditor.chartRender()
-    if (Label.luteAvailable) {
-      Vditor.mathRenderByLute(document.body)
-    } else {
-      Vditor.mathRender(document.body)
-    }
-
+    Vditor.mindmapRender()
+    Vditor.mathRender(document.body)
     Vditor.codeRender(document.body, Label.langLabel)
     Vditor.abcRender()
+    Vditor.graphvizRender(document.body)
 
     var hasLivePhoto = false
     $('.vditor-reset').each(function () {
@@ -235,11 +232,11 @@ var Util = {
    */
   makeNotificationRead: function (type, it) {
     $.ajax({
-      url: Label.servePath + '/notifications/read/' + type,
+      url: Label.servePath + '/notifications/make-read/' + type,
       type: 'GET',
       cache: false,
       success: function (result, textStatus) {
-        if (result.sc) {
+        if (0 === result.code) {
           Util.setUnreadNotificationCount(false)
           $('.notification li').addClass('read')
           if (it) {
@@ -518,7 +515,7 @@ var Util = {
               data: JSON.stringify(requestJSONObject),
               cache: false,
               success: function (result, textStatus) {
-                if (result.sc) {
+                if (0 === result.code) {
                   var value = cm.getValue()
                   value = value.replace(result.originalURL, result.url)
                   cm.setValue(value)
@@ -635,8 +632,12 @@ var Util = {
     }
 
     var options = {
+      outline: data.outline || false,
+      after: data.after || undefined,
       typewriterMode: data.typewriterMode || false,
-      cache: data.cache || false,
+      cache: {
+        enable: data.cache || false,
+      },
       input: data.input,
       preview: {
         delay: 500,
@@ -662,7 +663,10 @@ var Util = {
       },
       placeholder: data.placeholder,
       height: data.height,
-      counter: data.counter,
+      counter: {
+        enable: data.counter ? true : false,
+        max: data.counter,
+      },
       resize: {
         enable: data.resize.enable,
         position: data.resize.position,
@@ -710,16 +714,20 @@ var Util = {
     if ($(window).width() < 768) {
       options.toolbar = [
         'emoji',
-        'bold',
-        'italic',
         'link',
-        'list',
-        'check',
         'upload',
-        'wysiwyg',
-        'preview',
-        'fullscreen',
-        'help',
+        'edit-mode',
+        {
+          name: 'more',
+          toolbar: [
+            'insert-after',
+            'fullscreen',
+            'preview',
+            'format',
+            'info',
+            'help',
+          ],
+        }
       ]
       options.resize.enable = false
     } else if (data.toolbar) {
@@ -942,7 +950,7 @@ var Util = {
       cache: false,
       data: JSON.stringify(requestJSONObject),
       success: function (result, textStatus) {
-        if (result.sc) {
+        if (0 === result.code) {
           $(it).removeClass('disabled')
           if (typeof (index) !== 'undefined') {
             if ('article' === type || 'tag' === type) {
@@ -1003,7 +1011,7 @@ var Util = {
       cache: false,
       data: JSON.stringify(requestJSONObject),
       success: function (result, textStatus) {
-        if (result.sc) {
+        if (0 === result.code) {
           if (typeof (index) !== 'undefined') {
             if ('article' === type || 'tag' === type) {
               $(it).
@@ -1181,7 +1189,7 @@ var Util = {
           breezemoonContent: $text.val(),
         }),
         success: function (result) {
-          if (result.sc === 0) {
+          if (result.code === 0) {
             window.location.reload()
           } else {
             Util.alert(result.msg)

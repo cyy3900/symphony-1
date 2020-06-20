@@ -17,15 +17,15 @@
  */
 package org.b3log.symphony.service;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.repository.*;
 import org.b3log.latke.service.annotation.Service;
 import org.b3log.symphony.model.Verifycode;
 import org.b3log.symphony.repository.VerifycodeRepository;
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -41,7 +41,7 @@ public class VerifycodeQueryService {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(VerifycodeQueryService.class);
+    private static final Logger LOGGER = LogManager.getLogger(VerifycodeQueryService.class);
 
     /**
      * Verifycode repository.
@@ -61,20 +61,12 @@ public class VerifycodeQueryService {
         final Query query = new Query().setFilter(CompositeFilterOperator.and(
                 new PropertyFilter(Verifycode.TYPE, FilterOperator.EQUAL, type),
                 new PropertyFilter(Verifycode.BIZ_TYPE, FilterOperator.EQUAL, bizType),
-                new PropertyFilter(Verifycode.USER_ID, FilterOperator.EQUAL, userId))
-        ).addSort(Keys.OBJECT_ID, SortDirection.DESCENDING);
-
+                new PropertyFilter(Verifycode.USER_ID, FilterOperator.EQUAL, userId))).
+                addSort(Keys.OBJECT_ID, SortDirection.DESCENDING);
         try {
-            final JSONObject result = verifycodeRepository.get(query);
-            final JSONArray codes = result.optJSONArray(Keys.RESULTS);
-            if (0 == codes.length()) {
-                return null;
-            }
-
-            return codes.optJSONObject(0);
+            return verifycodeRepository.getFirst(query);
         } catch (final Exception e) {
             LOGGER.log(Level.ERROR, "Gets verifycode failed", e);
-
             return null;
         }
     }
@@ -87,18 +79,10 @@ public class VerifycodeQueryService {
      */
     public JSONObject getVerifycode(final String code) {
         final Query query = new Query().setFilter(new PropertyFilter(Verifycode.CODE, FilterOperator.EQUAL, code));
-
         try {
-            final JSONObject result = verifycodeRepository.get(query);
-            final JSONArray codes = result.optJSONArray(Keys.RESULTS);
-            if (0 == codes.length()) {
-                return null;
-            }
-
-            return codes.optJSONObject(0);
+            return verifycodeRepository.getFirst(query);
         } catch (final Exception e) {
             LOGGER.log(Level.ERROR, "Gets verifycode error", e);
-
             return null;
         }
     }

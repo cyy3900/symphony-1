@@ -20,28 +20,21 @@ package org.b3log.symphony.processor;
 import org.apache.commons.lang.StringUtils;
 import org.b3log.latke.Keys;
 import org.b3log.latke.Latkes;
-import org.b3log.latke.http.HttpMethod;
+import org.b3log.latke.http.Dispatcher;
 import org.b3log.latke.http.Request;
 import org.b3log.latke.http.RequestContext;
-import org.b3log.latke.http.annotation.After;
-import org.b3log.latke.http.annotation.Before;
-import org.b3log.latke.http.annotation.RequestProcessing;
-import org.b3log.latke.http.annotation.RequestProcessor;
 import org.b3log.latke.http.renderer.AbstractFreeMarkerRenderer;
+import org.b3log.latke.ioc.BeanManager;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Logger;
+import org.b3log.latke.ioc.Singleton;
 import org.b3log.latke.model.Pagination;
 import org.b3log.latke.model.User;
 import org.b3log.latke.service.LangPropsService;
-import org.b3log.latke.util.CollectionUtils;
 import org.b3log.latke.util.Paginator;
 import org.b3log.symphony.model.*;
-import org.b3log.symphony.processor.advice.AnonymousViewCheck;
-import org.b3log.symphony.processor.advice.CSRFToken;
-import org.b3log.symphony.processor.advice.PermissionGrant;
-import org.b3log.symphony.processor.advice.UserBlockCheck;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchEndAdvice;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchStartAdvice;
+import org.b3log.symphony.processor.middleware.AnonymousViewCheckMidware;
+import org.b3log.symphony.processor.middleware.CSRFMidware;
+import org.b3log.symphony.processor.middleware.UserCheckMidware;
 import org.b3log.symphony.service.*;
 import org.b3log.symphony.util.*;
 import org.json.JSONObject;
@@ -68,16 +61,11 @@ import java.util.*;
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
  * @author <a href="https://hacpai.com/member/ZephyrJung">Zephyr</a>
  * @author <a href="http://vanessa.b3log.org">Liyuan Li</a>
- * @version 1.27.1.0, Jul 7, 2019
+ * @version 2.0.0.0, Feb 11, 2020
  * @since 0.2.0
  */
-@RequestProcessor
+@Singleton
 public class UserProcessor {
-
-    /**
-     * Logger.
-     */
-    private static final Logger LOGGER = Logger.getLogger(UserProcessor.class);
 
     /**
      * User management service.
@@ -176,13 +164,35 @@ public class UserProcessor {
     private BreezemoonQueryService breezemoonQueryService;
 
     /**
+     * Register request handlers.
+     */
+    public static void register() {
+        final BeanManager beanManager = BeanManager.getInstance();
+        final AnonymousViewCheckMidware anonymousViewCheckMidware = beanManager.getReference(AnonymousViewCheckMidware.class);
+        final CSRFMidware csrfMidware = beanManager.getReference(CSRFMidware.class);
+        final UserCheckMidware userCheckMidware = beanManager.getReference(UserCheckMidware.class);
+
+        final UserProcessor userProcessor = beanManager.getReference(UserProcessor.class);
+        Dispatcher.get("/member/{userName}", userProcessor::showHome, anonymousViewCheckMidware::handle, userCheckMidware::handle);
+        Dispatcher.group().middlewares(anonymousViewCheckMidware::handle, userCheckMidware::handle, csrfMidware::fill).router().get().uris(new String[]{"/member/{userName}/breezemoons", "/member/{userName}/breezemoons/{breezemoonId}"}).handler(userProcessor::showHomeBreezemoons);
+        Dispatcher.get("/member/{userName}/comments/anonymous", userProcessor::showHomeAnonymousComments, userCheckMidware::handle);
+        Dispatcher.get("/member/{userName}/articles/anonymous", userProcessor::showAnonymousArticles, userCheckMidware::handle);
+        Dispatcher.get("/member/{userName}/comments", userProcessor::showHomeComments, anonymousViewCheckMidware::handle, userCheckMidware::handle);
+        Dispatcher.get("/member/{userName}/following/users", userProcessor::showHomeFollowingUsers, anonymousViewCheckMidware::handle, userCheckMidware::handle);
+        Dispatcher.get("/member/{userName}/following/tags", userProcessor::showHomeFollowingTags, anonymousViewCheckMidware::handle, userCheckMidware::handle);
+        Dispatcher.get("/member/{userName}/following/articles", userProcessor::showHomeFollowingArticles, anonymousViewCheckMidware::handle, userCheckMidware::handle);
+        Dispatcher.get("/member/{userName}/watching/articles", userProcessor::showHomeWatchingArticles, anonymousViewCheckMidware::handle, userCheckMidware::handle);
+        Dispatcher.get("/member/{userName}/followers", userProcessor::showHomeFollowers, anonymousViewCheckMidware::handle, userCheckMidware::handle);
+        Dispatcher.get("/member/{userName}/points", userProcessor::showHomePoints, anonymousViewCheckMidware::handle, userCheckMidware::handle);
+        Dispatcher.post("/users/names", userProcessor::listNames);
+        Dispatcher.get("/users/emotions", userProcessor::getFrequentEmotions);
+    }
+
+    /**
      * Shows user home breezemoons page.
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = {"/member/{userName}/breezemoons", "/member/{userName}/breezemoons/{breezemoonId}"}, method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class, UserBlockCheck.class})
-    @After({CSRFToken.class, PermissionGrant.class, StopwatchEndAdvice.class})
     public void showHomeBreezemoons(final RequestContext context) {
         final String breezemoonId = context.pathVar("breezemoonId");
         final Request request = context.getRequest();
@@ -238,7 +248,6 @@ public class UserProcessor {
             final JSONObject breezemoon = breezemoonQueryService.getBreezemoon(breezemoonId);
             if (null == breezemoon) {
                 context.sendError(404);
-
                 return;
             }
 
@@ -255,9 +264,6 @@ public class UserProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/member/{userName}/comments/anonymous", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, UserBlockCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showHomeAnonymousComments(final RequestContext context) {
         final Request request = context.getRequest();
 
@@ -276,7 +282,6 @@ public class UserProcessor {
         if (null == currentUser || (!currentUser.optString(Keys.OBJECT_ID).equals(user.optString(Keys.OBJECT_ID)))
                 && !Role.ROLE_ID_C_ADMIN.equals(currentUser.optString(User.USER_ROLE))) {
             context.sendError(404);
-
             return;
         }
 
@@ -329,9 +334,6 @@ public class UserProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/member/{userName}/articles/anonymous", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, UserBlockCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showAnonymousArticles(final RequestContext context) {
         final String userName = context.pathVar("userName");
         final Request request = context.getRequest();
@@ -351,7 +353,6 @@ public class UserProcessor {
         if (null == currentUser || (!currentUser.optString(Keys.OBJECT_ID).equals(user.optString(Keys.OBJECT_ID)))
                 && !Role.ROLE_ID_C_ADMIN.equals(currentUser.optString(User.USER_ROLE))) {
             context.sendError(404);
-
             return;
         }
 
@@ -405,9 +406,6 @@ public class UserProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/member/{userName}", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class, UserBlockCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showHome(final RequestContext context) {
         final String userName = context.pathVar("userName");
         final Request request = context.getRequest();
@@ -474,9 +472,6 @@ public class UserProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/member/{userName}/comments", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class, UserBlockCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showHomeComments(final RequestContext context) {
         final Request request = context.getRequest();
 
@@ -536,9 +531,6 @@ public class UserProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/member/{userName}/following/users", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class, UserBlockCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showHomeFollowingUsers(final RequestContext context) {
         final Request request = context.getRequest();
 
@@ -599,9 +591,6 @@ public class UserProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/member/{userName}/following/tags", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class, UserBlockCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showHomeFollowingTags(final RequestContext context) {
         final Request request = context.getRequest();
 
@@ -662,9 +651,6 @@ public class UserProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/member/{userName}/following/articles", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class, UserBlockCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showHomeFollowingArticles(final RequestContext context) {
         final Request request = context.getRequest();
 
@@ -725,9 +711,6 @@ public class UserProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/member/{userName}/watching/articles", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class, UserBlockCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showHomeWatchingArticles(final RequestContext context) {
         final Request request = context.getRequest();
 
@@ -788,9 +771,6 @@ public class UserProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/member/{userName}/followers", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class, UserBlockCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showHomeFollowers(final RequestContext context) {
         final Request request = context.getRequest();
 
@@ -857,9 +837,6 @@ public class UserProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/member/{userName}/points", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class, UserBlockCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showHomePoints(final RequestContext context) {
         final Request request = context.getRequest();
 
@@ -879,9 +856,8 @@ public class UserProcessor {
         final String followingId = user.optString(Keys.OBJECT_ID);
         dataModel.put(Follow.FOLLOWING_ID, followingId);
 
-        final JSONObject userPointsResult
-                = pointtransferQueryService.getUserPoints(user.optString(Keys.OBJECT_ID), pageNum, pageSize);
-        final List<JSONObject> userPoints = CollectionUtils.jsonArrayToList(userPointsResult.optJSONArray(Keys.RESULTS));
+        final JSONObject userPointsResult = pointtransferQueryService.getUserPoints(user.optString(Keys.OBJECT_ID), pageNum, pageSize);
+        final List<JSONObject> userPoints = (List<JSONObject>) userPointsResult.opt(Keys.RESULTS);
         dataModel.put(Common.USER_HOME_POINTS, userPoints);
 
         final boolean isLoggedIn = (Boolean) dataModel.get(Common.IS_LOGGED_IN);
@@ -914,7 +890,6 @@ public class UserProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/users/names", method = HttpMethod.POST)
     public void listNames(final RequestContext context) {
         final JSONObject result = Results.newSucc();
         context.renderJSON(result);
@@ -934,7 +909,6 @@ public class UserProcessor {
             }
 
             result.put(Common.DATA, userNames);
-
             return;
         }
 
@@ -947,7 +921,6 @@ public class UserProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/users/emotions", method = HttpMethod.GET)
     public void getFrequentEmotions(final RequestContext context) {
         final JSONObject result = Results.newSucc();
         context.renderJSON(result);
@@ -956,7 +929,6 @@ public class UserProcessor {
         final JSONObject currentUser = Sessions.getUser();
         if (null == currentUser) {
             result.put(Common.DATA, data);
-
             return;
         }
 

@@ -17,10 +17,11 @@
  */
 package org.b3log.symphony.service;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.repository.*;
 import org.b3log.latke.repository.annotation.Transactional;
 import org.b3log.latke.service.ServiceException;
@@ -32,8 +33,9 @@ import org.b3log.symphony.model.Tag;
 import org.b3log.symphony.repository.DomainRepository;
 import org.b3log.symphony.repository.DomainTagRepository;
 import org.b3log.symphony.repository.OptionRepository;
-import org.json.JSONArray;
 import org.json.JSONObject;
+
+import java.util.List;
 
 /**
  * Domain management service.
@@ -48,7 +50,7 @@ public class DomainMgmtService {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(DomainMgmtService.class);
+    private static final Logger LOGGER = LogManager.getLogger(DomainMgmtService.class);
 
     /**
      * Domain repository.
@@ -92,13 +94,12 @@ public class DomainMgmtService {
                     CompositeFilterOperator.and(
                             new PropertyFilter(Domain.DOMAIN + "_" + Keys.OBJECT_ID, FilterOperator.EQUAL, domainId),
                             new PropertyFilter(Tag.TAG + "_" + Keys.OBJECT_ID, FilterOperator.EQUAL, tagId)));
-
-            final JSONArray relations = domainTagRepository.get(query).optJSONArray(Keys.RESULTS);
-            if (relations.length() < 1) {
+            final List<JSONObject> relations = domainTagRepository.getList(query);
+            if (relations.size() < 1) {
                 return;
             }
 
-            final JSONObject relation = relations.optJSONObject(0);
+            final JSONObject relation = relations.get(0);
             domainTagRepository.remove(relation.optString(Keys.OBJECT_ID));
 
             // Refresh cache

@@ -18,19 +18,19 @@
 package org.b3log.symphony.service;
 
 import org.apache.commons.lang.StringUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.event.Event;
 import org.b3log.latke.event.EventManager;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.model.User;
 import org.b3log.latke.repository.*;
 import org.b3log.latke.repository.annotation.Transactional;
 import org.b3log.latke.service.LangPropsService;
 import org.b3log.latke.service.ServiceException;
 import org.b3log.latke.service.annotation.Service;
-import org.b3log.latke.util.CollectionUtils;
 import org.b3log.latke.util.Ids;
 import org.b3log.symphony.event.EventTypes;
 import org.b3log.symphony.model.*;
@@ -57,7 +57,7 @@ public class CommentMgmtService {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(CommentMgmtService.class);
+    private static final Logger LOGGER = LogManager.getLogger(CommentMgmtService.class);
 
     /**
      * Revision repository.
@@ -160,7 +160,7 @@ public class CommentMgmtService {
             final JSONObject comment = commentRepository.get(commentId);
             final String articleId = comment.optString(Comment.COMMENT_ON_ARTICLE_ID);
             final Query query = new Query().setFilter(new PropertyFilter(Comment.COMMENT_ON_ARTICLE_ID, FilterOperator.EQUAL, articleId));
-            final List<JSONObject> comments = CollectionUtils.jsonArrayToList(commentRepository.get(query).optJSONArray(Keys.RESULTS));
+            final List<JSONObject> comments = commentRepository.getList(query);
             for (final JSONObject c : comments) {
                 final int offered = c.optInt(Comment.COMMENT_QNA_OFFERED);
                 if (Comment.COMMENT_QNA_OFFERED_C_YES == offered) {
@@ -410,7 +410,7 @@ public class CommentMgmtService {
         if (currentTimeMillis - commenter.optLong(UserExt.USER_LATEST_CMT_TIME) < Symphonys.MIN_STEP_CMT_TIME
                 && !Role.ROLE_ID_C_ADMIN.equals(commenter.optString(User.USER_ROLE))
                 && !UserExt.COM_BOT_NAME.equals(commenter.optString(User.USER_NAME))) {
-            LOGGER.log(Level.WARN, "Adds comment too frequent [userName={0}]", commenter.optString(User.USER_NAME));
+            LOGGER.log(Level.WARN, "Adds comment too frequent [userName={}]", commenter.optString(User.USER_NAME));
             throw new ServiceException(langPropsService.get("tooFrequentCmtLabel"));
         }
 

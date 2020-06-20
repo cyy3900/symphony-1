@@ -18,14 +18,15 @@
 package org.b3log.symphony.processor;
 
 import org.apache.commons.lang.StringUtils;
-import org.b3log.latke.http.HttpMethod;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.b3log.latke.http.Dispatcher;
 import org.b3log.latke.http.RequestContext;
 import org.b3log.latke.http.Response;
-import org.b3log.latke.http.annotation.RequestProcessing;
-import org.b3log.latke.http.annotation.RequestProcessor;
 import org.b3log.latke.http.renderer.PngRenderer;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
+import org.b3log.latke.ioc.BeanManager;
+import org.b3log.latke.ioc.Singleton;
 import org.b3log.latke.util.Strings;
 import org.b3log.symphony.model.Common;
 import org.json.JSONObject;
@@ -52,16 +53,16 @@ import java.util.Set;
  * Captcha processor.
  *
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
- * @version 2.3.0.6, Nov 2, 2018
+ * @version 3.0.0.0, Feb 11, 2020
  * @since 0.2.2
  */
-@RequestProcessor
+@Singleton
 public class CaptchaProcessor {
 
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(CaptchaProcessor.class);
+    private static final Logger LOGGER = LogManager.getLogger(CaptchaProcessor.class);
 
     /**
      * Key of captcha.
@@ -82,6 +83,17 @@ public class CaptchaProcessor {
      * Captcha chars.
      */
     private static final String CHARS = "acdefhijklmnprstuvwxy234578";
+
+    /**
+     * Register request handlers.
+     */
+    public static void register() {
+        final BeanManager beanManager = BeanManager.getInstance();
+        final CaptchaProcessor captchaProcessor = beanManager.getReference(CaptchaProcessor.class);
+
+        Dispatcher.get("/captcha", captchaProcessor::get);
+        Dispatcher.get("/captcha/login", captchaProcessor::getLoginCaptcha);
+    }
 
     /**
      * Checks whether the specified captcha is invalid.
@@ -107,7 +119,6 @@ public class CaptchaProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/captcha", method = HttpMethod.GET)
     public void get(final RequestContext context) {
         final PngRenderer renderer = new PngRenderer();
         context.setRenderer(renderer);
@@ -153,7 +164,6 @@ public class CaptchaProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/captcha/login", method = HttpMethod.GET)
     public void getLoginCaptcha(final RequestContext context) {
         try {
             final Response response = context.getResponse();

@@ -18,13 +18,13 @@
 package org.b3log.symphony.cache;
 
 import org.apache.commons.lang.StringUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.ioc.BeanManager;
 import org.b3log.latke.ioc.Singleton;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.repository.*;
-import org.b3log.latke.util.CollectionUtils;
 import org.b3log.symphony.model.Tag;
 import org.b3log.symphony.repository.TagRepository;
 import org.b3log.symphony.util.JSONs;
@@ -47,7 +47,7 @@ public class TagCache {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(TagCache.class);
+    private static final Logger LOGGER = LogManager.getLogger(TagCache.class);
 
     /**
      * Icon tags.
@@ -194,9 +194,9 @@ public class TagCache {
         query.setFilter(new PropertyFilter(Tag.TAG_REFERENCE_CNT, FilterOperator.GREATER_THAN, 0));
 
         try {
-            final JSONObject result = tagRepository.get(query);
+            final List<JSONObject> result = tagRepository.getList(query);
             NEW_TAGS.clear();
-            NEW_TAGS.addAll(CollectionUtils.jsonArrayToList(result.optJSONArray(Keys.RESULTS)));
+            NEW_TAGS.addAll(result);
         } catch (final RepositoryException e) {
             LOGGER.log(Level.ERROR, "Gets new tags failed", e);
         }
@@ -217,7 +217,7 @@ public class TagCache {
                 addSort(Tag.TAG_RANDOM_DOUBLE, SortDirection.ASCENDING);
         try {
             final JSONObject result = tagRepository.get(query);
-            final List<JSONObject> tags = CollectionUtils.jsonArrayToList(result.optJSONArray(Keys.RESULTS));
+            final List<JSONObject> tags = (List<JSONObject>) result.opt(Keys.RESULTS);
             final List<JSONObject> toUpdateTags = new ArrayList<>();
             for (final JSONObject tag : tags) {
                 toUpdateTags.add(JSONs.clone(tag));
@@ -256,7 +256,7 @@ public class TagCache {
                 setPage(1, Integer.MAX_VALUE).setPageCount(1);
         try {
             final JSONObject result = tagRepository.get(query);
-            final List<JSONObject> tags = CollectionUtils.jsonArrayToList(result.optJSONArray(Keys.RESULTS));
+            final List<JSONObject> tags = (List<JSONObject>) result.opt(Keys.RESULTS);
 
             final Iterator<JSONObject> iterator = tags.iterator();
             while (iterator.hasNext()) {
@@ -267,14 +267,12 @@ public class TagCache {
                         || StringUtils.contains(title, " ")
                         || StringUtils.contains(title, "　")) { // filter legacy data
                     iterator.remove();
-
                     continue;
                 }
 
                 if (!Tag.containsWhiteListTags(title)) {
                     if (!Tag.TAG_TITLE_PATTERN.matcher(title).matches() || title.length() > Tag.MAX_TAG_TITLE_LENGTH) {
                         iterator.remove();
-
                         continue;
                     }
                 }

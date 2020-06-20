@@ -19,12 +19,13 @@ package org.b3log.symphony.service;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.math.RandomUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.Latkes;
 import org.b3log.latke.http.RequestContext;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.model.User;
 import org.b3log.latke.service.LangPropsService;
 import org.b3log.latke.service.annotation.Service;
@@ -45,7 +46,7 @@ import java.util.*;
  * Data model service.
  *
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
- * @version 1.12.2.41, Sep 16, 2019
+ * @version 1.12.2.42, Feb 12, 2020
  * @since 0.2.0
  */
 @Service
@@ -54,7 +55,7 @@ public class DataModelService {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(DataModelService.class);
+    private static final Logger LOGGER = LogManager.getLogger(DataModelService.class);
 
     /**
      * Language service.
@@ -145,7 +146,6 @@ public class DataModelService {
         final int articleStatus = article.optInt(Article.ARTICLE_STATUS);
         if (Article.ARTICLE_STATUS_C_INVALID == articleStatus) {
             dataModel.put(Common.SIDE_RELEVANT_ARTICLES, Collections.emptyList());
-
             return;
         }
 
@@ -266,8 +266,32 @@ public class DataModelService {
         fillSideTips(dataModel);
         fillSideBreezemoons(dataModel);
         fillDomainNav(dataModel);
+        fillPermission(dataModel);
 
         dataModel.put(Common.CSRF_TOKEN, Sessions.getCSRFToken(context));
+    }
+
+    /**
+     * Fill permissions.
+     *
+     * @param dataModel the specified data model
+     */
+    private void fillPermission(final Map<String, Object> dataModel) {
+        Stopwatchs.start("Grant permissions");
+        try {
+            final JSONObject user = Sessions.getUser();
+            final String roleId = null != user ? user.optString(User.USER_ROLE) : Role.ROLE_ID_C_VISITOR;
+            final Map<String, JSONObject> permissionsGrant = roleQueryService.getPermissionsGrantMap(roleId);
+            dataModel.put(Permission.PERMISSIONS, permissionsGrant);
+
+            final JSONObject role = roleQueryService.getRole(roleId);
+
+            String noPermissionLabel = langPropsService.get("noPermissionLabel");
+            noPermissionLabel = noPermissionLabel.replace("{roleName}", role.optString(Role.ROLE_NAME));
+            dataModel.put("noPermissionLabel", noPermissionLabel);
+        } finally {
+            Stopwatchs.end();
+        }
     }
 
     /**

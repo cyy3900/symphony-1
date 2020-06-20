@@ -19,22 +19,14 @@ package org.b3log.symphony.processor;
 
 import org.b3log.latke.Keys;
 import org.b3log.latke.Latkes;
-import org.b3log.latke.http.HttpMethod;
 import org.b3log.latke.http.Request;
 import org.b3log.latke.http.RequestContext;
-import org.b3log.latke.http.annotation.After;
-import org.b3log.latke.http.annotation.Before;
-import org.b3log.latke.http.annotation.RequestProcessing;
-import org.b3log.latke.http.annotation.RequestProcessor;
 import org.b3log.latke.http.renderer.AbstractFreeMarkerRenderer;
 import org.b3log.latke.ioc.Inject;
+import org.b3log.latke.ioc.Singleton;
 import org.b3log.latke.model.Pagination;
 import org.b3log.latke.util.Paginator;
 import org.b3log.symphony.model.*;
-import org.b3log.symphony.processor.advice.AnonymousViewCheck;
-import org.b3log.symphony.processor.advice.PermissionGrant;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchEndAdvice;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchStartAdvice;
 import org.b3log.symphony.service.*;
 import org.b3log.symphony.util.Sessions;
 import org.b3log.symphony.util.Symphonys;
@@ -51,10 +43,10 @@ import java.util.Map;
  * </ul>
  *
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
- * @version 1.1.0.12, Jan 5, 2019
+ * @version 2.0.0.0, Feb 11, 2020
  * @since 1.4.0
  */
-@RequestProcessor
+@Singleton
 public class DomainProcessor {
 
     /**
@@ -92,9 +84,6 @@ public class DomainProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/domain/{domainURI}", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showDomainArticles(final RequestContext context) {
         final String domainURI = context.pathVar("domainURI");
         final Request request = context.getRequest();
@@ -110,7 +99,6 @@ public class DomainProcessor {
 
             if (!UserExt.finshedGuide(user)) {
                 context.sendRedirect(Latkes.getServePath() + "/guide");
-
                 return;
             }
         }
@@ -118,7 +106,6 @@ public class DomainProcessor {
         final JSONObject domain = domainQueryService.getByURI(domainURI);
         if (null == domain) {
             context.sendError(404);
-
             return;
         }
 
@@ -159,9 +146,6 @@ public class DomainProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/domains", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showDomains(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "domains.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();

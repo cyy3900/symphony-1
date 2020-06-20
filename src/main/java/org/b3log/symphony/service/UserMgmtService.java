@@ -25,11 +25,12 @@ import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.RandomStringUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.time.DateUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.Latkes;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.model.User;
 import org.b3log.latke.repository.*;
 import org.b3log.latke.repository.annotation.Transactional;
@@ -40,12 +41,11 @@ import org.b3log.latke.util.Ids;
 import org.b3log.latke.util.URLs;
 import org.b3log.symphony.model.*;
 import org.b3log.symphony.processor.FileUploadProcessor;
-import org.b3log.symphony.processor.advice.validate.UserRegisterValidation;
+import org.b3log.symphony.processor.middleware.validate.UserRegisterValidationMidware;
 import org.b3log.symphony.repository.*;
 import org.b3log.symphony.util.Geos;
 import org.b3log.symphony.util.Gravatars;
 import org.b3log.symphony.util.Symphonys;
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import javax.imageio.ImageIO;
@@ -68,7 +68,7 @@ public class UserMgmtService {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(UserMgmtService.class);
+    private static final Logger LOGGER = LogManager.getLogger(UserMgmtService.class);
 
     /**
      * User repository.
@@ -556,19 +556,14 @@ public class UserMgmtService {
                     filters.add(new PropertyFilter(UserExt.USER_STATUS, FilterOperator.EQUAL,
                             UserExt.USER_STATUS_C_NOT_VERIFIED));
                     query.setFilter(new CompositeFilter(CompositeFilterOperator.AND, filters));
-
-                    final JSONArray others = userRepository.get(query).optJSONArray(Keys.RESULTS);
-                    for (int i = 0; i < others.length(); i++) {
-                        final JSONObject u = others.optJSONObject(i);
+                    final List<JSONObject> others = userRepository.getList(query);
+                    for (final JSONObject u : others) {
                         final String id = u.optString(Keys.OBJECT_ID);
                         final String mail = u.optString(User.USER_EMAIL);
-
                         u.put(User.USER_NAME, UserExt.NULL_USER_NAME);
                         u.put(User.USER_EMAIL, "");
                         u.put(UserExt.USER_STATUS, UserExt.USER_STATUS_C_NOT_VERIFIED);
-
                         userRepository.update(id, u);
-
                         LOGGER.log(Level.INFO, "Defeated a user [email=" + mail + "]");
                     }
 
@@ -713,7 +708,7 @@ public class UserMgmtService {
         final Transaction transaction = userRepository.beginTransaction();
 
         try {
-            if (UserRegisterValidation.invalidUserName(newUserName)) {
+            if (UserRegisterValidationMidware.invalidUserName(newUserName)) {
                 throw new ServiceException(langPropsService.get("invalidUserNameLabel") + " [" + newUserName + "]");
             }
 
@@ -746,22 +741,15 @@ public class UserMgmtService {
         filters.add(new PropertyFilter(UserExt.USER_STATUS, FilterOperator.EQUAL, UserExt.USER_STATUS_C_NOT_VERIFIED));
         filters.add(new PropertyFilter(Keys.OBJECT_ID, FilterOperator.LESS_THAN_OR_EQUAL, yesterdayTime));
         filters.add(new PropertyFilter(User.USER_NAME, FilterOperator.NOT_EQUAL, UserExt.NULL_USER_NAME));
-
         final Query query = new Query().setFilter(new CompositeFilter(CompositeFilterOperator.AND, filters));
-
         try {
-            final JSONObject result = userRepository.get(query);
-            final JSONArray users = result.optJSONArray(Keys.RESULTS);
-
-            for (int i = 0; i < users.length(); i++) {
-                final JSONObject user = users.optJSONObject(i);
+            final List<JSONObject> users = userRepository.getList(query);
+            for (final JSONObject user : users) {
                 user.put(User.USER_NAME, UserExt.NULL_USER_NAME);
                 final String email = user.optString(User.USER_EMAIL);
                 user.put(User.USER_EMAIL, "");
-
                 final String id = user.optString(Keys.OBJECT_ID);
                 userRepository.update(id, user);
-
                 LOGGER.log(Level.INFO, "Reset unverified user [email=" + email + "]");
             }
         } catch (final RepositoryException e) {
@@ -781,15 +769,12 @@ public class UserMgmtService {
         filters.add(new PropertyFilter(User.USER + '_' + Keys.OBJECT_ID,
                 FilterOperator.EQUAL, user.optString(Keys.OBJECT_ID)));
         filters.add(new PropertyFilter(Common.TYPE, FilterOperator.EQUAL, Tag.TAG_TYPE_C_USER_SELF));
-
         final Query query = new Query();
         query.setFilter(new CompositeFilter(CompositeFilterOperator.AND, filters));
-
-        final JSONArray results = userTagRepository.get(query).optJSONArray(Keys.RESULTS);
-        for (int i = 0; i < results.length(); i++) {
-            final JSONObject rel = results.optJSONObject(i);
+        final List<JSONObject> results = userTagRepository.getList(query);
+        for (int i = 0; i < results.size(); i++) {
+            final JSONObject rel = results.get(i);
             final String id = rel.optString(Keys.OBJECT_ID);
-
             userTagRepository.remove(id);
         }
 
@@ -803,7 +788,7 @@ public class UserMgmtService {
             String tagId;
 
             if (null == tag) {
-                LOGGER.log(Level.TRACE, "Found a new tag[title={0}] in user [name={1}]",
+                LOGGER.log(Level.TRACE, "Found a new tag[title={}] in user [name={}]",
                         tagTitle, user.optString(User.USER_NAME));
                 tag = new JSONObject();
                 tag.put(Tag.TAG_TITLE, tagTitle);
@@ -842,7 +827,7 @@ public class UserMgmtService {
                 userTagRepository.add(userTagRelation);
             } else {
                 tagId = tag.optString(Keys.OBJECT_ID);
-                LOGGER.log(Level.TRACE, "Found a existing tag[title={0}, id={1}] in user[name={2}]",
+                LOGGER.log(Level.TRACE, "Found a existing tag[title={}, id={}] in user[name={}]",
                         tag.optString(Tag.TAG_TITLE), tag.optString(Keys.OBJECT_ID), user.optString(User.USER_NAME));
 
                 tagTitleStr = tagTitleStr.replaceAll("(?i)" + Pattern.quote(tagTitle), tag.optString(Tag.TAG_TITLE));

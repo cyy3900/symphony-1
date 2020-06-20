@@ -17,10 +17,10 @@
  */
 package org.b3log.symphony.service;
 
-import org.b3log.latke.Keys;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.repository.*;
 import org.b3log.latke.service.annotation.Service;
 import org.b3log.symphony.model.Article;
@@ -29,7 +29,6 @@ import org.b3log.symphony.model.Vote;
 import org.b3log.symphony.repository.ArticleRepository;
 import org.b3log.symphony.repository.CommentRepository;
 import org.b3log.symphony.repository.VoteRepository;
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
@@ -48,7 +47,7 @@ public class VoteQueryService {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(VoteQueryService.class);
+    private static final Logger LOGGER = LogManager.getLogger(VoteQueryService.class);
 
     /**
      * Vote repository.
@@ -80,22 +79,15 @@ public class VoteQueryService {
             final List<Filter> filters = new ArrayList<>();
             filters.add(new PropertyFilter(Vote.USER_ID, FilterOperator.EQUAL, userId));
             filters.add(new PropertyFilter(Vote.DATA_ID, FilterOperator.EQUAL, dataId));
-
             final Query query = new Query().setFilter(new CompositeFilter(CompositeFilterOperator.AND, filters));
-
-            final JSONObject result = voteRepository.get(query);
-            final JSONArray array = result.optJSONArray(Keys.RESULTS);
-
-            if (0 == array.length()) {
+            final JSONObject vote = voteRepository.getFirst(query);
+            if (null == vote) {
                 return -1;
             }
-
-            final JSONObject vote = array.optJSONObject(0);
 
             return vote.optInt(Vote.TYPE);
         } catch (final RepositoryException e) {
             LOGGER.log(Level.ERROR, e.getMessage());
-
             return -1;
         }
     }
@@ -113,7 +105,7 @@ public class VoteQueryService {
             if (Vote.DATA_TYPE_C_ARTICLE == dataType) {
                 final JSONObject article = articleRepository.get(dataId);
                 if (null == article) {
-                    LOGGER.log(Level.ERROR, "Not found article [id={0}]", dataId);
+                    LOGGER.log(Level.ERROR, "Not found article [id={}]", dataId);
 
                     return false;
                 }
@@ -122,7 +114,7 @@ public class VoteQueryService {
             } else if (Vote.DATA_TYPE_C_COMMENT == dataType) {
                 final JSONObject comment = commentRepository.get(dataId);
                 if (null == comment) {
-                    LOGGER.log(Level.ERROR, "Not found comment [id={0}]", dataId);
+                    LOGGER.log(Level.ERROR, "Not found comment [id={}]", dataId);
 
                     return false;
                 }

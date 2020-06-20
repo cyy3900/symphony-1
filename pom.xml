@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
     Description: Symphony POM.
-    Version: 2.17.0.15, Nov 22, 2019
+    Version: 2.17.0.35, Jun 20, 2020
     Author: Liang Ding
     Author: Zephyr
 -->
@@ -12,19 +12,17 @@
     <groupId>org.b3log</groupId>
     <artifactId>symphony</artifactId>
     <packaging>jar</packaging>
-    <version>3.6.0</version>
+    <version>3.6.3</version>
     <name>Symphony</name>
     <url>https://sym.b3log.org</url>
     <description>
-        一款用 Java 实现的现代化社区（论坛/BBS/社交网络/博客）平台。
+        一款用 Java 实现的现代化社区（论坛/BBS/社交网络/博客）系统平台。
     </description>
     <inceptionYear>2012</inceptionYear>
 
     <properties>
-        <latke.version>3.0.21</latke.version>
+        <latke.version>3.4.8</latke.version>
 
-        <slf4j.version>1.7.28</slf4j.version>
-        <mysql-connector-java.version>8.0.18</mysql-connector-java.version>
         <jsoup.version>1.12.1</jsoup.version>
         <flexmark.version>0.50.40</flexmark.version>
         <qiniu.version>7.2.23</qiniu.version>
@@ -32,7 +30,6 @@
         <emoji-java.version>5.1.0</emoji-java.version>
         <user-agent-utils.version>1.21</user-agent-utils.version>
         <es.version>2.3.1</es.version>
-        <guava.version>22.0</guava.version>
         <owasp.version>1.2.2</owasp.version>
         <snakeyaml.version>1.18</snakeyaml.version>
         <javax.mail.version>1.6.2</javax.mail.version>
@@ -127,38 +124,15 @@
 
     <dependencies>
         <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-log4j12</artifactId>
-            <version>${slf4j.version}</version>
-        </dependency>
-
-        <dependency>
             <groupId>org.b3log</groupId>
             <artifactId>latke-core</artifactId>
             <version>${latke.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>com.h2database</groupId>
-                    <artifactId>h2</artifactId>
-                </exclusion>
-
-                <exclusion>
-                    <groupId>redis.clients</groupId>
-                    <artifactId>jedis</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
         <dependency>
             <groupId>org.b3log</groupId>
             <artifactId>latke-repository-mysql</artifactId>
             <version>${latke.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>mysql</groupId>
-            <artifactId>mysql-connector-java</artifactId>
-            <version>${mysql-connector-java.version}</version>
         </dependency>
 
         <dependency>
@@ -246,12 +220,6 @@
         </dependency>
 
         <dependency>
-            <groupId>com.google.guava</groupId>
-            <artifactId>guava</artifactId>
-            <version>${guava.version}</version>
-        </dependency>
-
-        <dependency>
             <groupId>org.owasp.encoder</groupId>
             <artifactId>encoder</artifactId>
             <version>${owasp.version}</version>
@@ -311,7 +279,6 @@
                         <include>**/src/*/resources/scss/*.scss</include>
                         <include>**/src/*/resources/*.properties</include>
                         <include>**/src/*/resources/skins/*/*.properties</include>
-                        <include>**/src/*/resources/WEB-INF/*.xml</include>
                         <include>**/src/*/resources/*.xml</include>
                         <include>gulpfile.js</include>
                         <include>**/src/*/resources/**/*.ftl</include>

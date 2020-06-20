@@ -28,10 +28,10 @@
         </div>
         <div class="fn-hr5"></div>
         <div>
-            © ${year} <a href="https://b3log.org" target="_blank">B3log 开源</a>旗下云南链滴科技有限公司版权所有
+            © ${year} <a href="https://b3log.org" target="_blank">B3log 开源</a>
             <div class="fn-hr5"></div>
             <a href="https://sym.b3log.org" target="_blank">Sym</a>
-            ${version} • ${elapsed?c}ms
+            ${version}
         </div>
         <#if footerBeiAnHao != ''>
             <div class="fn-hr5"></div>
@@ -43,7 +43,7 @@
 </div>
 <script src="${staticServePath}/js/symbol-defs${miniPostfix}.js?${staticResourceVersion}"></script>
 <script src="${staticServePath}/js/lib/compress/libs.min.js?${staticResourceVersion}"></script>
-<script src="https://cdn.jsdelivr.net/npm/vditor@2.0.11/dist/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vditor@3.3.2/dist/index.min.js"></script>
 <script src="${staticServePath}/js/common${miniPostfix}.js?${staticResourceVersion}"></script>
 <script>
   var Label = {

@@ -18,14 +18,14 @@
 package org.b3log.symphony.service;
 
 import org.apache.commons.lang.StringUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.model.Pagination;
 import org.b3log.latke.repository.*;
 import org.b3log.latke.service.annotation.Service;
-import org.b3log.latke.util.CollectionUtils;
 import org.b3log.latke.util.Paginator;
 import org.b3log.symphony.model.Domain;
 import org.b3log.symphony.model.Tag;
@@ -33,7 +33,6 @@ import org.b3log.symphony.repository.DomainRepository;
 import org.b3log.symphony.repository.DomainTagRepository;
 import org.b3log.symphony.repository.TagRepository;
 import org.b3log.symphony.util.Markdowns;
-import org.json.JSONArray;
 import org.json.JSONObject;
 import org.jsoup.Jsoup;
 
@@ -54,7 +53,7 @@ public class DomainQueryService {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(DomainQueryService.class);
+    private static final Logger LOGGER = LogManager.getLogger(DomainQueryService.class);
 
     /**
      * Domain repository.
@@ -92,17 +91,14 @@ public class DomainQueryService {
                 addSort(Keys.OBJECT_ID, SortDirection.DESCENDING).
                 setPage(1, Integer.MAX_VALUE).setPageCount(1);
         try {
-            final List<JSONObject> ret = CollectionUtils.jsonArrayToList(domainRepository.get(query).optJSONArray(Keys.RESULTS));
+            final List<JSONObject> ret = domainRepository.getList(query);
             for (final JSONObject domain : ret) {
                 final List<JSONObject> tags = getTags(domain.optString(Keys.OBJECT_ID));
-
                 domain.put(Domain.DOMAIN_T_TAGS, (Object) tags);
             }
-
             return ret;
         } catch (final Exception e) {
             LOGGER.log(Level.ERROR, "Gets all domains failed", e);
-
             return Collections.emptyList();
         }
     }
@@ -121,17 +117,14 @@ public class DomainQueryService {
                 addSort(Keys.OBJECT_ID, SortDirection.DESCENDING).
                 setPage(1, fetchSize).setPageCount(1);
         try {
-            final List<JSONObject> ret = CollectionUtils.jsonArrayToList(domainRepository.get(query).optJSONArray(Keys.RESULTS));
+            final List<JSONObject> ret = domainRepository.getList(query);
             for (final JSONObject domain : ret) {
                 final List<JSONObject> tags = getTags(domain.optString(Keys.OBJECT_ID));
-
                 domain.put(Domain.DOMAIN_T_TAGS, (Object) tags);
             }
-
             return ret;
         } catch (final Exception e) {
             LOGGER.log(Level.ERROR, "Gets most tag navigation domains failed", e);
-
             return Collections.emptyList();
         }
     }
@@ -144,23 +137,18 @@ public class DomainQueryService {
      */
     public List<JSONObject> getTags(final String domainId) {
         final List<JSONObject> ret = new ArrayList<>();
-
         final Query query = new Query().
                 setFilter(new PropertyFilter(Domain.DOMAIN + "_" + Keys.OBJECT_ID, FilterOperator.EQUAL, domainId));
         try {
-            final List<JSONObject> relations = CollectionUtils.jsonArrayToList(
-                    domainTagRepository.get(query).optJSONArray(Keys.RESULTS));
-
+            final List<JSONObject> relations = domainTagRepository.getList(query);
             for (final JSONObject relation : relations) {
                 final String tagId = relation.optString(Tag.TAG + "_" + Keys.OBJECT_ID);
                 final JSONObject tag = tagRepository.get(tagId);
-
                 ret.add(tag);
             }
         } catch (final RepositoryException e) {
             LOGGER.log(Level.ERROR, "Gets domain [id=" + domainId + "] tags error", e);
         }
-
         return ret;
     }
 
@@ -308,23 +296,17 @@ public class DomainQueryService {
             result = domainRepository.get(query);
         } catch (final RepositoryException e) {
             LOGGER.log(Level.ERROR, "Gets domains failed", e);
-
             return null;
         }
 
         final int pageCount = result.optJSONObject(Pagination.PAGINATION).optInt(Pagination.PAGINATION_PAGE_COUNT);
-
         final JSONObject pagination = new JSONObject();
         ret.put(Pagination.PAGINATION, pagination);
         final List<Integer> pageNums = Paginator.paginate(currentPageNum, pageSize, pageCount, windowSize);
         pagination.put(Pagination.PAGINATION_PAGE_COUNT, pageCount);
         pagination.put(Pagination.PAGINATION_PAGE_NUMS, pageNums);
 
-        final JSONArray data = result.optJSONArray(Keys.RESULTS);
-        final List<JSONObject> domains = CollectionUtils.jsonArrayToList(data);
-
-        ret.put(Domain.DOMAINS, domains);
-
+        ret.put(Domain.DOMAINS, result.opt(Keys.RESULTS));
         return ret;
     }
 

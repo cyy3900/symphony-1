@@ -18,28 +18,25 @@
 package org.b3log.symphony.processor;
 
 import org.apache.commons.lang.StringUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
-import org.b3log.latke.http.HttpMethod;
+import org.b3log.latke.http.Dispatcher;
 import org.b3log.latke.http.Request;
 import org.b3log.latke.http.RequestContext;
-import org.b3log.latke.http.annotation.After;
-import org.b3log.latke.http.annotation.Before;
-import org.b3log.latke.http.annotation.RequestProcessing;
-import org.b3log.latke.http.annotation.RequestProcessor;
+import org.b3log.latke.ioc.BeanManager;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Logger;
+import org.b3log.latke.ioc.Singleton;
 import org.b3log.latke.model.User;
 import org.b3log.latke.service.LangPropsService;
 import org.b3log.latke.service.ServiceException;
 import org.b3log.latke.util.Requests;
 import org.b3log.symphony.model.*;
-import org.b3log.symphony.processor.advice.CSRFCheck;
-import org.b3log.symphony.processor.advice.LoginCheck;
-import org.b3log.symphony.processor.advice.PermissionCheck;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchEndAdvice;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchStartAdvice;
-import org.b3log.symphony.processor.advice.validate.CommentAddValidation;
-import org.b3log.symphony.processor.advice.validate.CommentUpdateValidation;
+import org.b3log.symphony.processor.middleware.CSRFMidware;
+import org.b3log.symphony.processor.middleware.LoginCheckMidware;
+import org.b3log.symphony.processor.middleware.PermissionMidware;
+import org.b3log.symphony.processor.middleware.validate.CommentAddValidationMidware;
+import org.b3log.symphony.processor.middleware.validate.CommentUpdateValidationMidware;
 import org.b3log.symphony.service.*;
 import org.b3log.symphony.util.*;
 import org.json.JSONObject;
@@ -62,16 +59,16 @@ import java.util.Set;
  * </ul>
  *
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
- * @version 1.8.0.5, Dec 16, 2018
+ * @version 2.0.0.0, Feb 11, 2020
  * @since 0.2.0
  */
-@RequestProcessor
+@Singleton
 public class CommentProcessor {
 
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(CommentProcessor.class);
+    private static final Logger LOGGER = LogManager.getLogger(CommentProcessor.class);
 
     /**
      * Revision query service.
@@ -128,16 +125,36 @@ public class CommentProcessor {
     private FollowMgmtService followMgmtService;
 
     /**
+     * Register request handlers.
+     */
+    public static void register() {
+        final BeanManager beanManager = BeanManager.getInstance();
+        final LoginCheckMidware loginCheck = beanManager.getReference(LoginCheckMidware.class);
+        final PermissionMidware permissionMidware = beanManager.getReference(PermissionMidware.class);
+        final CSRFMidware csrfMidware = beanManager.getReference(CSRFMidware.class);
+        final CommentUpdateValidationMidware commentUpdateValidationMidware = beanManager.getReference(CommentUpdateValidationMidware.class);
+        final CommentAddValidationMidware commentAddValidationMidware = beanManager.getReference(CommentAddValidationMidware.class);
+
+        final CommentProcessor commentProcessor = beanManager.getReference(CommentProcessor.class);
+        Dispatcher.post("/comment/accept", commentProcessor::acceptComment, loginCheck::handle, csrfMidware::check, permissionMidware::check);
+        Dispatcher.post("/comment/{id}/remove", commentProcessor::removeComment, loginCheck::handle, permissionMidware::check);
+        Dispatcher.get("/comment/{id}/revisions", commentProcessor::getCommentRevisions, loginCheck::handle, permissionMidware::check);
+        Dispatcher.get("/comment/{id}/content", commentProcessor::getCommentContent, loginCheck::handle);
+        Dispatcher.put("/comment/{id}", commentProcessor::updateComment, loginCheck::handle, csrfMidware::check, permissionMidware::check, commentUpdateValidationMidware::handle);
+        Dispatcher.post("/comment/original", commentProcessor::getOriginalComment);
+        Dispatcher.post("/comment/replies", commentProcessor::getReplies);
+        Dispatcher.post("/comment", commentProcessor::addComment, loginCheck::handle, csrfMidware::check, permissionMidware::check, commentAddValidationMidware::handle);
+        Dispatcher.post("/comment/thank", commentProcessor::thankComment, loginCheck::handle, csrfMidware::check, permissionMidware::check);
+    }
+
+    /**
      * Accepts a comment.
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/comment/accept", method = HttpMethod.POST)
-    @Before({LoginCheck.class, CSRFCheck.class, PermissionCheck.class})
     public void acceptComment(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
-        final Request request = context.getRequest();
         final JSONObject requestJSONObject = context.requestJSON();
         final JSONObject currentUser = Sessions.getUser();
         final String userId = currentUser.optString(Keys.OBJECT_ID);
@@ -146,28 +163,25 @@ public class CommentProcessor {
         try {
             final JSONObject comment = commentQueryService.getComment(commentId);
             if (null == comment) {
-                context.renderFalseResult().renderMsg("Not found comment to accept");
-
+                context.renderMsg("Not found comment to accept");
                 return;
             }
             final String commentAuthorId = comment.optString(Comment.COMMENT_AUTHOR_ID);
             if (StringUtils.equals(userId, commentAuthorId)) {
-                context.renderFalseResult().renderMsg(langPropsService.get("thankSelfLabel"));
-
+                context.renderMsg(langPropsService.get("thankSelfLabel"));
                 return;
             }
 
             final String articleId = comment.optString(Comment.COMMENT_ON_ARTICLE_ID);
             final JSONObject article = articleQueryService.getArticle(articleId);
             if (!StringUtils.equals(userId, article.optString(Article.ARTICLE_AUTHOR_ID))) {
-                context.renderFalseResult().renderMsg(langPropsService.get("sc403Label"));
-
+                context.renderMsg(langPropsService.get("sc403Label"));
                 return;
             }
 
             commentMgmtService.acceptComment(commentId);
 
-            context.renderTrueResult();
+            context.renderJSON(StatusCodes.SUCC);
         } catch (final ServiceException e) {
             context.renderMsg(e.getMessage());
         }
@@ -178,15 +192,10 @@ public class CommentProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/comment/{id}/remove", method = HttpMethod.POST)
-    @Before({StopwatchStartAdvice.class, LoginCheck.class, PermissionCheck.class})
-    @After({StopwatchEndAdvice.class})
     public void removeComment(final RequestContext context) {
         final String id = context.pathVar("id");
-        final Request request = context.getRequest();
         if (StringUtils.isBlank(id)) {
             context.sendError(404);
-
             return;
         }
 
@@ -195,28 +204,26 @@ public class CommentProcessor {
         final JSONObject comment = commentQueryService.getComment(id);
         if (null == comment) {
             context.sendError(404);
-
             return;
         }
 
         final String authorId = comment.optString(Comment.COMMENT_AUTHOR_ID);
         if (!authorId.equals(currentUserId)) {
             context.sendError(403);
-
             return;
         }
 
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
         try {
             commentMgmtService.removeComment(id);
 
-            context.renderJSONValue(Keys.STATUS_CODE, StatusCodes.SUCC);
+            context.renderJSONValue(Keys.CODE, StatusCodes.SUCC);
             context.renderJSONValue(Comment.COMMENT_T_ID, id);
         } catch (final ServiceException e) {
             final String msg = e.getMessage();
 
             context.renderMsg(msg);
-            context.renderJSONValue(Keys.STATUS_CODE, StatusCodes.ERR);
+            context.renderJSONValue(Keys.CODE, StatusCodes.ERR);
         }
     }
 
@@ -225,17 +232,13 @@ public class CommentProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/comment/{id}/revisions", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, LoginCheck.class, PermissionCheck.class})
-    @After({StopwatchEndAdvice.class})
     public void getCommentRevisions(final RequestContext context) {
         final String id = context.pathVar("id");
         final JSONObject viewer = Sessions.getUser();
         final List<JSONObject> revisions = revisionQueryService.getCommentRevisions(viewer, id);
         final JSONObject ret = new JSONObject();
-        ret.put(Keys.STATUS_CODE, true);
+        ret.put(Keys.CODE, StatusCodes.SUCC);
         ret.put(Revision.REVISIONS, (Object) revisions);
-
         context.renderJSON(ret);
     }
 
@@ -244,29 +247,25 @@ public class CommentProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/comment/{id}/content", method = HttpMethod.GET)
-    @Before({LoginCheck.class})
     public void getCommentContent(final RequestContext context) {
         final String id = context.pathVar("id");
-        context.renderJSON().renderJSONValue(Keys.STATUS_CODE, StatusCodes.ERR);
+        context.renderJSON(StatusCodes.ERR);
 
         final JSONObject comment = commentQueryService.getComment(id);
         if (null == comment) {
             LOGGER.warn("Not found comment [id=" + id + "] to update");
-
             return;
         }
 
         final JSONObject currentUser = Sessions.getUser();
         if (!currentUser.optString(Keys.OBJECT_ID).equals(comment.optString(Comment.COMMENT_AUTHOR_ID))) {
             context.sendError(403);
-
             return;
         }
 
         context.renderJSONValue(Comment.COMMENT_CONTENT, comment.optString(Comment.COMMENT_CONTENT));
         context.renderJSONValue(Comment.COMMENT_VISIBLE, comment.optInt(Comment.COMMENT_VISIBLE));
-        context.renderJSONValue(Keys.STATUS_CODE, StatusCodes.SUCC);
+        context.renderJSONValue(Keys.CODE, StatusCodes.SUCC);
     }
 
     /**
@@ -283,11 +282,9 @@ public class CommentProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/comment/{id}", method = HttpMethod.PUT)
-    @Before({CSRFCheck.class, LoginCheck.class, CommentUpdateValidation.class, PermissionCheck.class})
     public void updateComment(final RequestContext context) {
         final String id = context.pathVar("id");
-        context.renderJSON().renderJSONValue(Keys.STATUS_CODE, StatusCodes.ERR);
+        context.renderJSON(StatusCodes.ERR);
 
         final Request request = context.getRequest();
 
@@ -295,14 +292,12 @@ public class CommentProcessor {
             final JSONObject comment = commentQueryService.getComment(id);
             if (null == comment) {
                 LOGGER.warn("Not found comment [id=" + id + "] to update");
-
                 return;
             }
 
             final JSONObject currentUser = Sessions.getUser();
             if (!currentUser.optString(Keys.OBJECT_ID).equals(comment.optString(Comment.COMMENT_AUTHOR_ID))) {
                 context.sendError(403);
-
                 return;
             }
 
@@ -333,10 +328,10 @@ public class CommentProcessor {
             commentContent = Emotions.convert(commentContent);
             commentContent = Markdowns.toHTML(commentContent);
             commentContent = Markdowns.clean(commentContent, "");
-            commentContent = MP3Players.render(commentContent);
-            commentContent = VideoPlayers.render(commentContent);
+            commentContent = MediaPlayers.renderAudio(commentContent);
+            commentContent = MediaPlayers.renderVideo(commentContent);
 
-            context.renderJSONValue(Keys.STATUS_CODE, StatusCodes.SUCC);
+            context.renderJSONValue(Keys.CODE, StatusCodes.SUCC);
             context.renderJSONValue(Comment.COMMENT_CONTENT, commentContent);
         } catch (final ServiceException e) {
             context.renderMsg(e.getMessage());
@@ -348,9 +343,7 @@ public class CommentProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/comment/original", method = HttpMethod.POST)
     public void getOriginalComment(final RequestContext context) {
-        final Request request = context.getRequest();
         final JSONObject requestJSONObject = context.requestJSON();
         final String commentId = requestJSONObject.optString(Comment.COMMENT_T_ID);
         int commentViewMode = requestJSONObject.optInt(UserExt.USER_COMMENT_VIEW_MODE);
@@ -371,7 +364,7 @@ public class CommentProcessor {
                             originalCmtId, Reward.TYPE_C_COMMENT));
         }
 
-        context.renderJSON(true).renderJSONValue(Comment.COMMENT_T_REPLIES, originalCmt);
+        context.renderJSON(StatusCodes.SUCC).renderJSONValue(Comment.COMMENT_T_REPLIES, originalCmt);
     }
 
     /**
@@ -379,7 +372,6 @@ public class CommentProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/comment/replies", method = HttpMethod.POST)
     public void getReplies(final RequestContext context) {
         final JSONObject requestJSONObject = context.requestJSON();
         final String commentId = requestJSONObject.optString(Comment.COMMENT_T_ID);
@@ -391,8 +383,7 @@ public class CommentProcessor {
         }
 
         if (StringUtils.isBlank(commentId)) {
-            context.renderJSON(true).renderJSONValue(Comment.COMMENT_T_REPLIES, Collections.emptyList());
-
+            context.renderJSON(StatusCodes.SUCC).renderJSONValue(Comment.COMMENT_T_REPLIES, Collections.emptyList());
             return;
         }
 
@@ -412,7 +403,7 @@ public class CommentProcessor {
             reply.put(Common.REWARED_COUNT, rewardCount);
         }
 
-        context.renderJSON(true).renderJSONValue(Comment.COMMENT_T_REPLIES, replies);
+        context.renderJSON(StatusCodes.SUCC).renderJSONValue(Comment.COMMENT_T_REPLIES, replies);
     }
 
     /**
@@ -433,10 +424,8 @@ public class CommentProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/comment", method = HttpMethod.POST)
-    @Before({CSRFCheck.class, LoginCheck.class, CommentAddValidation.class, PermissionCheck.class})
     public void addComment(final RequestContext context) {
-        context.renderJSON().renderJSONValue(Keys.STATUS_CODE, StatusCodes.ERR);
+        context.renderJSON(StatusCodes.ERR);
 
         final Request request = context.getRequest();
         final JSONObject requestJSONObject = (JSONObject) context.attr(Keys.REQUEST);
@@ -481,14 +470,12 @@ public class CommentProcessor {
                 for (final String userName : userNames) {
                     if (userName.equals(currentUserName)) {
                         invited = true;
-
                         break;
                     }
                 }
 
                 if (!invited) {
                     context.sendError(403);
-
                     return;
                 }
             }
@@ -508,7 +495,7 @@ public class CommentProcessor {
                 followMgmtService.watchArticle(commentAuthorId, articleId);
             }
 
-            context.renderJSONValue(Keys.STATUS_CODE, StatusCodes.SUCC);
+            context.renderJSONValue(Keys.CODE, StatusCodes.SUCC);
         } catch (final ServiceException e) {
             context.renderMsg(e.getMessage());
         }
@@ -519,10 +506,8 @@ public class CommentProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/comment/thank", method = HttpMethod.POST)
-    @Before({LoginCheck.class, CSRFCheck.class, PermissionCheck.class})
     public void thankComment(final RequestContext context) {
-        context.renderJSON();
+        context.renderJSON(StatusCodes.ERR);
 
         final JSONObject requestJSONObject = context.requestJSON();
         final JSONObject currentUser = Sessions.getUser();
@@ -531,7 +516,7 @@ public class CommentProcessor {
         try {
             commentMgmtService.thankComment(commentId, currentUser.optString(Keys.OBJECT_ID));
 
-            context.renderTrueResult().renderMsg(langPropsService.get("thankSentLabel"));
+            context.renderJSON(StatusCodes.SUCC).renderMsg(langPropsService.get("thankSentLabel"));
         } catch (final ServiceException e) {
             context.renderMsg(e.getMessage());
         }

@@ -19,14 +19,15 @@ package org.b3log.symphony.processor.channel;
 
 import freemarker.template.Template;
 import org.apache.commons.lang.StringUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.http.Session;
 import org.b3log.latke.http.WebSocketChannel;
 import org.b3log.latke.http.WebSocketSession;
 import org.b3log.latke.ioc.BeanManager;
 import org.b3log.latke.ioc.Singleton;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.model.User;
 import org.b3log.latke.service.LangPropsService;
 import org.b3log.latke.util.Locales;
@@ -56,7 +57,7 @@ public class ArticleChannel implements WebSocketChannel {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(ArticleChannel.class);
+    private static final Logger LOGGER = LogManager.getLogger(ArticleChannel.class);
 
     /**
      * Session set.
@@ -140,7 +141,6 @@ public class ArticleChannel implements WebSocketChannel {
                         for (final String inviteUserName : userNames) {
                             if (inviteUserName.equals(userName)) {
                                 invited = true;
-
                                 break;
                             }
                         }
@@ -183,7 +183,7 @@ public class ArticleChannel implements WebSocketChannel {
                     dataModel.put(Permission.PERMISSIONS, permissions);
                 }
 
-                final String templateDirName = httpSession.getAttribute(Keys.TEMAPLTE_DIR_NAME);
+                final String templateDirName = httpSession.getAttribute(Keys.TEMPLATE_DIR_NAME);
                 final Template template = Templates.getTemplate(templateDirName + "/common/comment.ftl");
                 final StringWriter stringWriter = new StringWriter();
                 template.process(dataModel, stringWriter);

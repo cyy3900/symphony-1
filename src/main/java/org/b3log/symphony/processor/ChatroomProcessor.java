@@ -17,29 +17,25 @@
  */
 package org.b3log.symphony.processor;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
-import org.b3log.latke.http.HttpMethod;
+import org.b3log.latke.http.Dispatcher;
 import org.b3log.latke.http.RequestContext;
-import org.b3log.latke.http.annotation.After;
-import org.b3log.latke.http.annotation.Before;
-import org.b3log.latke.http.annotation.RequestProcessing;
-import org.b3log.latke.http.annotation.RequestProcessor;
 import org.b3log.latke.http.renderer.AbstractFreeMarkerRenderer;
+import org.b3log.latke.ioc.BeanManager;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
+import org.b3log.latke.ioc.Singleton;
 import org.b3log.latke.model.User;
 import org.b3log.latke.util.Locales;
 import org.b3log.latke.util.Times;
 import org.b3log.symphony.model.Common;
 import org.b3log.symphony.model.UserExt;
-import org.b3log.symphony.processor.advice.AnonymousViewCheck;
-import org.b3log.symphony.processor.advice.LoginCheck;
-import org.b3log.symphony.processor.advice.PermissionGrant;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchEndAdvice;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchStartAdvice;
-import org.b3log.symphony.processor.advice.validate.ChatMsgAddValidation;
 import org.b3log.symphony.processor.channel.ChatroomChannel;
+import org.b3log.symphony.processor.middleware.AnonymousViewCheckMidware;
+import org.b3log.symphony.processor.middleware.LoginCheckMidware;
+import org.b3log.symphony.processor.middleware.validate.ChatMsgAddValidationMidware;
 import org.b3log.symphony.service.*;
 import org.b3log.symphony.util.*;
 import org.json.JSONObject;
@@ -59,16 +55,16 @@ import static org.b3log.symphony.processor.channel.ChatroomChannel.SESSIONS;
  * </ul>
  *
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
- * @version 1.3.5.22, Sep 6, 2019
+ * @version 2.0.0.0, Feb 11, 2020
  * @since 1.4.0
  */
-@RequestProcessor
+@Singleton
 public class ChatroomProcessor {
 
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(ChatroomProcessor.class);
+    private static final Logger LOGGER = LogManager.getLogger(ChatroomProcessor.class);
 
     /**
      * Chat messages.
@@ -130,6 +126,20 @@ public class ChatroomProcessor {
     private ArticleQueryService articleQueryService;
 
     /**
+     * Register request handlers.
+     */
+    public static void register() {
+        final BeanManager beanManager = BeanManager.getInstance();
+        final LoginCheckMidware loginCheck = beanManager.getReference(LoginCheckMidware.class);
+        final AnonymousViewCheckMidware anonymousViewCheckMidware = beanManager.getReference(AnonymousViewCheckMidware.class);
+        final ChatMsgAddValidationMidware chatMsgAddValidationMidware = beanManager.getReference(ChatMsgAddValidationMidware.class);
+
+        final ChatroomProcessor chatroomProcessor = beanManager.getReference(ChatroomProcessor.class);
+        Dispatcher.post("/chat-room/send", chatroomProcessor::addChatRoomMsg, loginCheck::handle, chatMsgAddValidationMidware::handle);
+        Dispatcher.get("/cr", chatroomProcessor::showChatRoom, anonymousViewCheckMidware::handle);
+    }
+
+    /**
      * Adds a chat message.
      * <p>
      * The request json object (a chat message):
@@ -142,11 +152,7 @@ public class ChatroomProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/chat-room/send", method = HttpMethod.POST)
-    @Before({LoginCheck.class, ChatMsgAddValidation.class})
     public synchronized void addChatRoomMsg(final RequestContext context) {
-        context.renderJSON();
-
         final JSONObject requestJSONObject = (JSONObject) context.attr(Keys.REQUEST);
         String content = requestJSONObject.optString(Common.CONTENT);
 
@@ -174,7 +180,7 @@ public class ChatroomProcessor {
         pushMsg.put(Common.TIME, Times.getTimeAgo(msg.optLong(Common.TIME), Locales.getLocale()));
         ChatroomChannel.notifyChat(pushMsg);
 
-        context.renderTrueResult();
+        context.renderJSON(StatusCodes.SUCC);
 
         try {
             final String userId = currentUser.optString(Keys.OBJECT_ID);
@@ -191,9 +197,6 @@ public class ChatroomProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/cr", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showChatRoom(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "chat-room.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();

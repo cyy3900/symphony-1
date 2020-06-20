@@ -17,19 +17,18 @@
  */
 package org.b3log.symphony.processor;
 
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
 import org.b3log.latke.Keys;
 import org.b3log.latke.Latkes;
-import org.b3log.latke.http.HttpMethod;
+import org.b3log.latke.http.Dispatcher;
 import org.b3log.latke.http.Request;
 import org.b3log.latke.http.RequestContext;
-import org.b3log.latke.http.annotation.After;
-import org.b3log.latke.http.annotation.Before;
-import org.b3log.latke.http.annotation.RequestProcessing;
-import org.b3log.latke.http.annotation.RequestProcessor;
 import org.b3log.latke.http.renderer.AbstractFreeMarkerRenderer;
+import org.b3log.latke.http.renderer.TextHtmlRenderer;
+import org.b3log.latke.ioc.BeanManager;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Logger;
+import org.b3log.latke.ioc.Singleton;
 import org.b3log.latke.model.Pagination;
 import org.b3log.latke.service.LangPropsService;
 import org.b3log.latke.util.Locales;
@@ -38,18 +37,19 @@ import org.b3log.latke.util.Stopwatchs;
 import org.b3log.symphony.model.Article;
 import org.b3log.symphony.model.Common;
 import org.b3log.symphony.model.UserExt;
-import org.b3log.symphony.processor.advice.AnonymousViewCheck;
-import org.b3log.symphony.processor.advice.PermissionGrant;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchEndAdvice;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchStartAdvice;
+import org.b3log.symphony.processor.middleware.AnonymousViewCheckMidware;
+import org.b3log.symphony.processor.middleware.LoginCheckMidware;
 import org.b3log.symphony.service.ArticleQueryService;
 import org.b3log.symphony.service.DataModelService;
 import org.b3log.symphony.service.UserMgmtService;
 import org.b3log.symphony.service.UserQueryService;
+import org.b3log.symphony.util.Markdowns;
 import org.b3log.symphony.util.Sessions;
 import org.b3log.symphony.util.Symphonys;
 import org.json.JSONObject;
 
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
@@ -67,16 +67,11 @@ import java.util.*;
  *
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
  * @author <a href="http://vanessa.b3log.org">Liyuan Li</a>
- * @version 1.15.0.3, Jan 8, 2019
+ * @version 2.0.0.0, Feb 11, 2020
  * @since 0.2.0
  */
-@RequestProcessor
+@Singleton
 public class IndexProcessor {
-
-    /**
-     * Logger.
-     */
-    private static final Logger LOGGER = Logger.getLogger(IndexProcessor.class);
 
     /**
      * Article query service.
@@ -109,13 +104,50 @@ public class IndexProcessor {
     private LangPropsService langPropsService;
 
     /**
+     * Register request handlers.
+     */
+    public static void register() {
+        final BeanManager beanManager = BeanManager.getInstance();
+        final LoginCheckMidware loginCheck = beanManager.getReference(LoginCheckMidware.class);
+        final AnonymousViewCheckMidware anonymousViewCheckMidware = beanManager.getReference(AnonymousViewCheckMidware.class);
+
+        final IndexProcessor indexProcessor = beanManager.getReference(IndexProcessor.class);
+        Dispatcher.get("/CHANGE_LOGS.html", indexProcessor::showChangelogs);
+        Dispatcher.group().middlewares(anonymousViewCheckMidware::handle).router().get().uris(new String[]{"/qna", "/qna/unanswered", "/qna/reward", "/qna/hot"}).handler(indexProcessor::showQnA);
+        Dispatcher.group().middlewares(loginCheck::handle).router().get().uris(new String[]{"/watch", "/watch/users"}).handler(indexProcessor::showWatch);
+        Dispatcher.get("/", indexProcessor::showIndex);
+        Dispatcher.group().middlewares(anonymousViewCheckMidware::handle).router().get().uris(new String[]{"/recent", "/recent/hot", "/recent/good", "/recent/reply"}).handler(indexProcessor::showRecent);
+        Dispatcher.get("/about", indexProcessor::showAbout);
+        Dispatcher.get("/kill-browser", indexProcessor::showKillBrowser);
+        Dispatcher.get("/hot", indexProcessor::showHotArticles, anonymousViewCheckMidware::handle);
+        Dispatcher.get("/perfect", indexProcessor::showPerfectArticles, anonymousViewCheckMidware::handle);
+        Dispatcher.get("/charge/point", indexProcessor::showChargePoint, anonymousViewCheckMidware::handle);
+    }
+
+
+    /**
+     * Show changelogs.
+     *
+     * @param context the specified context
+     */
+    public void showChangelogs(final RequestContext context) {
+        try {
+            final TextHtmlRenderer renderer = new TextHtmlRenderer();
+            context.setRenderer(renderer);
+            try (final InputStream resourceAsStream = IndexProcessor.class.getResourceAsStream("/CHANGE_LOGS.md")) {
+                final String content = IOUtils.toString(resourceAsStream, StandardCharsets.UTF_8);
+                renderer.setContent(Markdowns.toHTML(content));
+            }
+        } catch (final Exception e) {
+            context.sendStatus(500);
+        }
+    }
+
+    /**
      * Shows question articles.
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = {"/qna", "/qna/unanswered", "/qna/reward", "/qna/hot"}, method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showQnA(final RequestContext context) {
         final Request request = context.getRequest();
 
@@ -130,7 +162,6 @@ public class IndexProcessor {
 
             if (!UserExt.finshedGuide(user)) {
                 context.sendRedirect(Latkes.getServePath() + "/guide");
-
                 return;
             }
         }
@@ -140,19 +171,15 @@ public class IndexProcessor {
         switch (sortModeStr) {
             case "":
                 sortMode = 0;
-
                 break;
             case "/unanswered":
                 sortMode = 1;
-
                 break;
             case "/reward":
                 sortMode = 2;
-
                 break;
             case "/hot":
                 sortMode = 3;
-
                 break;
             default:
                 sortMode = 0;
@@ -189,9 +216,6 @@ public class IndexProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = {"/watch", "/watch/users"}, method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showWatch(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "watch.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();
@@ -203,7 +227,6 @@ public class IndexProcessor {
 
             if (!UserExt.finshedGuide(user)) {
                 context.sendRedirect(Latkes.getServePath() + "/guide");
-
                 return;
             }
         }
@@ -216,14 +239,12 @@ public class IndexProcessor {
                     final List<JSONObject> followingTagArticles = articleQueryService.getFollowingTagArticles(user.optString(Keys.OBJECT_ID), 1, pageSize);
                     dataModel.put(Common.WATCHING_ARTICLES, followingTagArticles);
                 }
-
                 break;
             case "/users":
                 if (null != user) {
                     final List<JSONObject> followingUserArticles = articleQueryService.getFollowingUserArticles(user.optString(Keys.OBJECT_ID), 1, pageSize);
                     dataModel.put(Common.WATCHING_ARTICLES, followingUserArticles);
                 }
-
                 break;
         }
 
@@ -242,9 +263,6 @@ public class IndexProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = {"", "/"}, method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showIndex(final RequestContext context) {
         final JSONObject currentUser = Sessions.getUser();
         if (null != currentUser) {
@@ -252,7 +270,6 @@ public class IndexProcessor {
             final String indexRedirectURL = currentUser.optString(UserExt.USER_INDEX_REDIRECT_URL);
             if (StringUtils.isNotBlank(indexRedirectURL)) {
                 context.sendRedirect(indexRedirectURL);
-
                 return;
             }
         }
@@ -277,9 +294,6 @@ public class IndexProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = {"/recent", "/recent/hot", "/recent/good", "/recent/reply"}, method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showRecent(final RequestContext context) {
         final Request request = context.getRequest();
 
@@ -293,7 +307,6 @@ public class IndexProcessor {
 
             if (!UserExt.finshedGuide(user)) {
                 context.sendRedirect(Latkes.getServePath() + "/guide");
-
                 return;
             }
         }
@@ -303,19 +316,15 @@ public class IndexProcessor {
         switch (sortModeStr) {
             case "":
                 sortMode = 0;
-
                 break;
             case "/hot":
                 sortMode = 1;
-
                 break;
             case "/good":
                 sortMode = 2;
-
                 break;
             case "/reply":
                 sortMode = 3;
-
                 break;
             default:
                 sortMode = 0;
@@ -365,9 +374,6 @@ public class IndexProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/hot", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showHotArticles(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "hot.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();
@@ -399,9 +405,6 @@ public class IndexProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/perfect", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showPerfectArticles(final RequestContext context) {
         final Request request = context.getRequest();
 
@@ -414,7 +417,6 @@ public class IndexProcessor {
             pageSize = user.optInt(UserExt.USER_LIST_PAGE_SIZE);
             if (!UserExt.finshedGuide(user)) {
                 context.sendRedirect(Latkes.getServePath() + "/guide");
-
                 return;
             }
         }
@@ -447,9 +449,6 @@ public class IndexProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/about", method = HttpMethod.GET)
-    @Before(StopwatchStartAdvice.class)
-    @After(StopwatchEndAdvice.class)
     public void showAbout(final RequestContext context) {
         // 关于页主要描述社区愿景、行为准则、内容协议等，并介绍社区的功能
         // 这些内容请搭建后自行编写发布，然后再修改这里进行重定向
@@ -461,9 +460,6 @@ public class IndexProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/kill-browser", method = HttpMethod.GET)
-    @Before(StopwatchStartAdvice.class)
-    @After(StopwatchEndAdvice.class)
     public void showKillBrowser(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "other/kill-browser.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();
@@ -471,5 +467,20 @@ public class IndexProcessor {
         dataModel.putAll(langs);
         Keys.fillRuntime(dataModel);
         dataModelService.fillMinified(dataModel);
+    }
+
+    /**
+     * Shows charge point.
+     *
+     * @param context the specified context
+     */
+    public void showChargePoint(final RequestContext context) {
+        final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "charge-point.ftl");
+        final Map<String, Object> dataModel = renderer.getDataModel();
+        dataModelService.fillHeaderAndFooter(context, dataModel);
+        dataModelService.fillRandomArticles(dataModel);
+        dataModelService.fillSideHotArticles(dataModel);
+        dataModelService.fillSideTags(dataModel);
+        dataModelService.fillLatestCmts(dataModel);
     }
 }

@@ -17,14 +17,13 @@
  */
 package org.b3log.symphony.processor;
 
-import org.b3log.latke.http.HttpMethod;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.http.RequestContext;
-import org.b3log.latke.http.annotation.RequestProcessing;
-import org.b3log.latke.http.annotation.RequestProcessor;
 import org.b3log.latke.http.renderer.TextXmlRenderer;
 import org.b3log.latke.ioc.Inject;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
+import org.b3log.latke.ioc.Singleton;
 import org.b3log.symphony.model.sitemap.Sitemap;
 import org.b3log.symphony.service.SitemapQueryService;
 
@@ -32,16 +31,16 @@ import org.b3log.symphony.service.SitemapQueryService;
  * Sitemap processor.
  *
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
- * @version 1.0.0.0, Sep 24, 2016
+ * @version 2.0.0.1, Apr 8, 2020
  * @since 1.6.0
  */
-@RequestProcessor
+@Singleton
 public class SitemapProcessor {
 
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(SitemapProcessor.class);
+    private static final Logger LOGGER = LogManager.getLogger(SitemapProcessor.class);
 
     /**
      * Sitemap query service.
@@ -54,30 +53,16 @@ public class SitemapProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/sitemap.xml", method = HttpMethod.GET)
     public void sitemap(final RequestContext context) {
         final TextXmlRenderer renderer = new TextXmlRenderer();
-
         context.setRenderer(renderer);
-
         final Sitemap sitemap = new Sitemap();
-
-        try {
-            LOGGER.log(Level.INFO, "Generating sitemap....");
-
-            sitemapQueryService.genIndex(sitemap);
-            sitemapQueryService.genDomains(sitemap);
-            sitemapQueryService.genArticles(sitemap);
-
-            final String content = sitemap.toString();
-
-            LOGGER.log(Level.INFO, "Generated sitemap");
-
-            renderer.setContent(content);
-        } catch (final Exception e) {
-            LOGGER.log(Level.ERROR, "Get blog article feed error", e);
-
-            context.getResponse().sendError(500);
-        }
+        LOGGER.log(Level.DEBUG, "Generating sitemap....");
+        sitemapQueryService.genIndex(sitemap);
+        sitemapQueryService.genDomains(sitemap);
+        // sitemapQueryService.genArticles(sitemap);
+        final String content = sitemap.toString();
+        LOGGER.log(Level.DEBUG, "Generated sitemap");
+        renderer.setContent(content);
     }
 }

@@ -20,25 +20,22 @@ package org.b3log.symphony.processor;
 import org.apache.commons.lang.StringUtils;
 import org.b3log.latke.Keys;
 import org.b3log.latke.Latkes;
-import org.b3log.latke.http.HttpMethod;
+import org.b3log.latke.http.Dispatcher;
 import org.b3log.latke.http.Request;
 import org.b3log.latke.http.RequestContext;
-import org.b3log.latke.http.annotation.After;
-import org.b3log.latke.http.annotation.Before;
-import org.b3log.latke.http.annotation.RequestProcessing;
-import org.b3log.latke.http.annotation.RequestProcessor;
 import org.b3log.latke.http.renderer.AbstractFreeMarkerRenderer;
+import org.b3log.latke.ioc.BeanManager;
 import org.b3log.latke.ioc.Inject;
+import org.b3log.latke.ioc.Singleton;
 import org.b3log.latke.model.Pagination;
 import org.b3log.latke.util.Paginator;
 import org.b3log.latke.util.URLs;
 import org.b3log.symphony.model.*;
-import org.b3log.symphony.processor.advice.AnonymousViewCheck;
-import org.b3log.symphony.processor.advice.PermissionGrant;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchEndAdvice;
-import org.b3log.symphony.processor.advice.stopwatch.StopwatchStartAdvice;
+import org.b3log.symphony.processor.middleware.AnonymousViewCheckMidware;
+import org.b3log.symphony.processor.middleware.LoginCheckMidware;
 import org.b3log.symphony.service.*;
 import org.b3log.symphony.util.Sessions;
+import org.b3log.symphony.util.StatusCodes;
 import org.b3log.symphony.util.Symphonys;
 import org.json.JSONObject;
 
@@ -56,10 +53,10 @@ import java.util.Map;
  *
  * @author <a href="http://88250.b3log.org">Liang Ding</a>
  * @author <a href="http://vanessa.b3log.org">Liyuan Li</a>
- * @version 1.7.0.15, Jan 5, 2019
+ * @version 3.0.0.0, Feb 11, 2020
  * @since 0.2.0
  */
-@RequestProcessor
+@Singleton
 public class TagProcessor {
 
     /**
@@ -93,19 +90,31 @@ public class TagProcessor {
     private DataModelService dataModelService;
 
     /**
+     * Register request handlers.
+     */
+    public static void register() {
+        final BeanManager beanManager = BeanManager.getInstance();
+        final LoginCheckMidware loginCheck = beanManager.getReference(LoginCheckMidware.class);
+        final AnonymousViewCheckMidware anonymousViewCheckMidware = beanManager.getReference(AnonymousViewCheckMidware.class);
+
+        final TagProcessor tagProcessor = beanManager.getReference(TagProcessor.class);
+        Dispatcher.get("/tags/query", tagProcessor::queryTags, loginCheck::handle);
+        Dispatcher.get("/tags", tagProcessor::showTagsWall, anonymousViewCheckMidware::handle);
+        Dispatcher.group().middlewares(anonymousViewCheckMidware::handle).router().get().uris(new String[]{"/tag/{tagURI}", "/tag/{tagURI}/hot", "/tag/{tagURI}/good", "/tag/{tagURI}/reply", "/tag/{tagURI}/perfect"}).handler(tagProcessor::showTagArticles);
+    }
+
+    /**
      * Queries tags.
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/tags/query", method = HttpMethod.GET)
     public void queryTags(final RequestContext context) {
         if (!Sessions.isLoggedIn()) {
             context.setStatus(403);
-
             return;
         }
 
-        context.renderJSON().renderTrueResult();
+        context.renderJSON(StatusCodes.SUCC);
 
         final String titlePrefix = context.param("title");
 
@@ -130,9 +139,6 @@ public class TagProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = "/tags", method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showTagsWall(final RequestContext context) {
         final AbstractFreeMarkerRenderer renderer = new SkinRenderer(context, "tags.ftl");
         final Map<String, Object> dataModel = renderer.getDataModel();
@@ -151,10 +157,6 @@ public class TagProcessor {
      *
      * @param context the specified context
      */
-    @RequestProcessing(value = {"/tag/{tagURI}", "/tag/{tagURI}/hot", "/tag/{tagURI}/good", "/tag/{tagURI}/reply",
-            "/tag/{tagURI}/perfect"}, method = HttpMethod.GET)
-    @Before({StopwatchStartAdvice.class, AnonymousViewCheck.class})
-    @After({PermissionGrant.class, StopwatchEndAdvice.class})
     public void showTagArticles(final RequestContext context) {
         final String tagURI = context.pathVar("tagURI");
         final Request request = context.getRequest();
@@ -171,7 +173,6 @@ public class TagProcessor {
 
             if (!UserExt.finshedGuide(user)) {
                 context.sendRedirect(Latkes.getServePath() + "/guide");
-
                 return;
             }
         }
@@ -179,7 +180,6 @@ public class TagProcessor {
         final JSONObject tag = tagQueryService.getTagByURI(tagURI);
         if (null == tag) {
             context.sendError(404);
-
             return;
         }
         tag.put(Common.IS_RESERVED, tagQueryService.isReservedTag(tag.optString(Tag.TAG_TITLE)));
@@ -202,23 +202,18 @@ public class TagProcessor {
         switch (sortModeStr) {
             case "":
                 sortMode = 0;
-
                 break;
             case "/hot":
                 sortMode = 1;
-
                 break;
             case "/good":
                 sortMode = 2;
-
                 break;
             case "/reply":
                 sortMode = 3;
-
                 break;
             case "/perfect":
                 sortMode = 4;
-
                 break;
             default:
                 sortMode = 0;

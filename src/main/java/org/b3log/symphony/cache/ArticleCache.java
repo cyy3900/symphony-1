@@ -18,15 +18,15 @@
 package org.b3log.symphony.cache;
 
 import org.apache.commons.lang.time.DateUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.cache.Cache;
 import org.b3log.latke.cache.CacheFactory;
 import org.b3log.latke.ioc.BeanManager;
 import org.b3log.latke.ioc.Singleton;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.repository.*;
-import org.b3log.latke.util.CollectionUtils;
 import org.b3log.latke.util.Stopwatchs;
 import org.b3log.symphony.model.Article;
 import org.b3log.symphony.model.Common;
@@ -56,7 +56,7 @@ public class ArticleCache {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(ArticleCache.class);
+    private static final Logger LOGGER = LogManager.getLogger(ArticleCache.class);
 
     /**
      * Article cache.
@@ -119,7 +119,7 @@ public class ArticleCache {
             query.setFilter(new CompositeFilter(CompositeFilterOperator.AND, filters)).
                     select(Article.ARTICLE_TITLE, Article.ARTICLE_PERMALINK, Article.ARTICLE_AUTHOR_ID, Article.ARTICLE_ANONYMOUS);
             final JSONObject result = articleRepository.get(query);
-            final List<JSONObject> articles = CollectionUtils.jsonArrayToList(result.optJSONArray(Keys.RESULTS));
+            final List<JSONObject> articles = (List<JSONObject>) result.opt(Keys.RESULTS);
             articleQueryService.organizeArticles(articles);
 
             SIDE_HOT_ARTICLES.clear();
@@ -242,10 +242,8 @@ public class ArticleCache {
                     Article.ARTICLE_QNA_OFFER_POINT,
                     Article.ARTICLE_SHOW_IN_LIST);
             final JSONObject result = articleRepository.get(query);
-            final List<JSONObject> articles = CollectionUtils.jsonArrayToList(result.optJSONArray(Keys.RESULTS));
-
+            final List<JSONObject> articles = (List<JSONObject>) result.opt(Keys.RESULTS);
             articleQueryService.organizeArticles(articles);
-
             PERFECT_ARTICLES.clear();
             PERFECT_ARTICLES.addAll(articles);
         } catch (final RepositoryException e) {

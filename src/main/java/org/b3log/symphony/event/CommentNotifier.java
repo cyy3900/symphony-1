@@ -19,13 +19,14 @@ package org.b3log.symphony.event;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.time.DateFormatUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.b3log.latke.Keys;
 import org.b3log.latke.event.AbstractEventListener;
 import org.b3log.latke.event.Event;
 import org.b3log.latke.ioc.Inject;
 import org.b3log.latke.ioc.Singleton;
-import org.b3log.latke.logging.Level;
-import org.b3log.latke.logging.Logger;
 import org.b3log.latke.model.Pagination;
 import org.b3log.latke.model.User;
 import org.b3log.latke.repository.*;
@@ -56,7 +57,7 @@ public class CommentNotifier extends AbstractEventListener<JSONObject> {
     /**
      * Logger.
      */
-    private static final Logger LOGGER = Logger.getLogger(CommentNotifier.class);
+    private static final Logger LOGGER = LogManager.getLogger(CommentNotifier.class);
 
     /**
      * Comment repository.
@@ -133,7 +134,7 @@ public class CommentNotifier extends AbstractEventListener<JSONObject> {
     @Override
     public void action(final Event<JSONObject> event) {
         final JSONObject data = event.getData();
-        LOGGER.log(Level.TRACE, "Processing an event [type={0}, data={1}]", event.getType(), data);
+        LOGGER.log(Level.TRACE, "Processing an event [type={}, data={}]", event.getType(), data);
 
         try {
             final JSONObject originalArticle = data.getJSONObject(Article.ARTICLE);
@@ -168,14 +169,12 @@ public class CommentNotifier extends AbstractEventListener<JSONObject> {
                                 new PropertyFilter(Comment.COMMENT_ON_ARTICLE_ID, FilterOperator.EQUAL, articleId),
                                 new PropertyFilter(Keys.OBJECT_ID, FilterOperator.LESS_THAN_OR_EQUAL, originalCmtId)
                         )).addSort(Keys.OBJECT_ID, SortDirection.ASCENDING);
-
                         break;
                     case UserExt.USER_COMMENT_VIEW_MODE_C_REALTIME:
                         numQuery.setFilter(CompositeFilterOperator.and(
                                 new PropertyFilter(Comment.COMMENT_ON_ARTICLE_ID, FilterOperator.EQUAL, articleId),
                                 new PropertyFilter(Keys.OBJECT_ID, FilterOperator.GREATER_THAN_OR_EQUAL, originalCmtId)
                         )).addSort(Keys.OBJECT_ID, SortDirection.DESCENDING);
-
                         break;
                 }
 
@@ -215,8 +214,8 @@ public class CommentNotifier extends AbstractEventListener<JSONObject> {
             cc = Emotions.convert(cc);
             cc = Markdowns.toHTML(cc);
             cc = Markdowns.clean(cc, "");
-            cc = MP3Players.render(cc);
-            cc = VideoPlayers.render(cc);
+            cc = MediaPlayers.renderAudio(cc);
+            cc = MediaPlayers.renderVideo(cc);
 
             chData.put(Comment.COMMENT_CONTENT, cc);
             chData.put(Comment.COMMENT_UA, originalComment.optString(Comment.COMMENT_UA));
@@ -268,7 +267,6 @@ public class CommentNotifier extends AbstractEventListener<JSONObject> {
                         pointtransferMgmtService.transfer(commenterId, Pointtransfer.ID_C_SYS,
                                 Pointtransfer.TRANSFER_TYPE_C_AT_PARTICIPANTS, sum, commentId, System.currentTimeMillis(), "");
                     }
-
                     return;
                 }
             }
